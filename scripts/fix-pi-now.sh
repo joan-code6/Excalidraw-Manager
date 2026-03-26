@@ -4,8 +4,16 @@ set -euo pipefail
 REPO_DIR="/home/bennet/production/Excalidraw-Manager"
 APP_SERVICE="excalidraw-manager"
 CF_SERVICE="cloudflared"
+REPO_URL="https://github.com/joan-code6/Excalidraw-Manager.git"
 
 cd "$REPO_DIR"
+
+echo "Step 0: ensure git origin remote"
+if ! git remote get-url origin >/dev/null 2>&1; then
+  git remote add origin "$REPO_URL"
+else
+  git remote set-url origin "$REPO_URL"
+fi
 
 echo "Step 1: update repo"
 git pull

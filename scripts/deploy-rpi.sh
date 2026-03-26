@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BRANCH="${BRANCH:-main}"
+REPO_URL="${REPO_URL:-https://github.com/joan-code6/Excalidraw-Manager.git}"
 APP_SERVICE_NAME="${APP_SERVICE_NAME:-excalidraw-manager.service}"
 
 log() {
@@ -37,6 +38,11 @@ fi
 if [[ -n "$(git status --porcelain)" ]]; then
   log "Working tree is dirty. Commit/stash/discard local changes, then retry deploy."
   exit 1
+fi
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  log "Missing git remote origin, adding ${REPO_URL}"
+  git remote add origin "${REPO_URL}"
 fi
 
 log "Fetching latest commit"

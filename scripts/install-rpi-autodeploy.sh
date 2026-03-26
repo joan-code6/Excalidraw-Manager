@@ -9,6 +9,7 @@ fi
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PORT="${APP_PORT:-4173}"
 BRANCH="${BRANCH:-main}"
+REPO_URL="${REPO_URL:-https://github.com/joan-code6/Excalidraw-Manager.git}"
 APP_SERVICE_NAME="${APP_SERVICE_NAME:-excalidraw-manager.service}"
 WATCHER_SERVICE_NAME="${WATCHER_SERVICE_NAME:-excalidraw-manager-autodeploy.service}"
 
@@ -46,6 +47,7 @@ Restart=always
 RestartSec=10
 Environment=BRANCH=${BRANCH}
 Environment=REPO_DIR=${REPO_DIR}
+Environment=REPO_URL=${REPO_URL}
 Environment=POLL_INTERVAL_SECONDS=30
 Environment=APP_SERVICE_NAME=${APP_SERVICE_NAME}
 

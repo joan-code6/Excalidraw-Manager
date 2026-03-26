@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BRANCH="${BRANCH:-main}"
+REPO_URL="${REPO_URL:-https://github.com/joan-code6/Excalidraw-Manager.git}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-30}"
 STATE_FILE="${STATE_FILE:-${REPO_DIR}/.last-deployed-sha}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-${REPO_DIR}/scripts/deploy-rpi.sh}"
@@ -22,6 +23,12 @@ if [[ ! -x "${DEPLOY_SCRIPT}" ]]; then
 fi
 
 cd "${REPO_DIR}"
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  log "Missing git remote origin, adding ${REPO_URL}"
+  git remote add origin "${REPO_URL}"
+fi
+
 log "Watching origin/${BRANCH} every ${POLL_INTERVAL_SECONDS}s"
 
 while true; do
