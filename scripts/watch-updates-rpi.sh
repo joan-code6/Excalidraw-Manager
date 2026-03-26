@@ -17,8 +17,8 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -x "${DEPLOY_SCRIPT}" ]]; then
-  log "Deploy script not executable: ${DEPLOY_SCRIPT}"
+if [[ ! -f "${DEPLOY_SCRIPT}" ]]; then
+  log "Deploy script not found: ${DEPLOY_SCRIPT}"
   exit 1
 fi
 
@@ -47,7 +47,7 @@ while true; do
 
   if [[ "${remote_sha}" != "${deployed_sha}" ]]; then
     log "New commit detected: ${remote_sha}"
-    if BRANCH="${BRANCH}" REPO_DIR="${REPO_DIR}" "${DEPLOY_SCRIPT}"; then
+    if BRANCH="${BRANCH}" REPO_DIR="${REPO_DIR}" REPO_URL="${REPO_URL}" /bin/bash "${DEPLOY_SCRIPT}"; then
       printf '%s\n' "${remote_sha}" > "${STATE_FILE}"
       log "Updated deployed SHA to ${remote_sha}"
     else
