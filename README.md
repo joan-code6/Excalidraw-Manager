@@ -124,3 +124,13 @@ ls -la /home/bennet/.cloudflared
 ```
 
 Pick the matching `.json` file and update `credentials-file` in `/etc/cloudflared/config.yml`.
+
+## Emergency Pi Fix Script
+
+If tunnel or app services get stuck, run this on the Raspberry Pi:
+
+```bash
+cd /home/bennet/production/Excalidraw-Manager
+git pull
+bash ./scripts/fix-pi-now.sh
+```
