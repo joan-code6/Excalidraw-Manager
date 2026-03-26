@@ -128,3 +128,75 @@
     @apply font-sans;
     }
 }
+
+/* Sleek Design Enhancements */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer components {
+  /* Card hover effects */
+  .group {
+    @apply transition-all duration-300;
+  }
+
+  /* Smooth transitions for all interactive elements */
+  button, input, a, [role="button"] {
+    @apply transition-all duration-200;
+  }
+
+  /* Loading spinner animation */
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Gradient background for gallery */
+  .bg-gradient-to-br {
+    @apply bg-gradient-to-br from-background via-background to-muted/20;
+  }
+
+  /* Header animations */
+  h1, h2, h3 {
+    @apply font-semibold tracking-tight;
+  }
+
+  /* Input and form enhancements */
+  input:focus {
+    @apply ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+
+  /* Button hover lift effect */
+  button:not([variant="ghost"]):hover:not(:disabled) {
+    @apply -translate-y-0.5 shadow-lg;
+  }
+
+  /* Card elevation on hover */
+  [class*="card"]:hover {
+    @apply shadow-lg;
+  }
+}
