@@ -22,6 +22,17 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v node >/dev/null 2>&1; then
+  log "node is required but not installed."
+  exit 1
+fi
+
+NODE_MAJOR="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
+if [[ "${NODE_MAJOR}" -lt 20 ]]; then
+  log "Node.js 20+ is required (found $(node -v)). Upgrade Node on the Raspberry Pi."
+  exit 1
+fi
+
 # Refuse deploy if local changes exist to avoid accidental data loss.
 if [[ -n "$(git status --porcelain)" ]]; then
   log "Working tree is dirty. Commit/stash/discard local changes, then retry deploy."
@@ -36,7 +47,11 @@ git checkout "${BRANCH}"
 git pull --ff-only origin "${BRANCH}"
 
 log "Installing dependencies"
-npm ci
+if ! npm ci --include=optional; then
+  log "npm ci failed, retrying with clean install to recover optional native bindings"
+  rm -rf node_modules
+  npm install --include=optional
+fi
 
 log "Building app"
 npm run build
