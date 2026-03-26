@@ -13,6 +13,12 @@ REPO_URL="${REPO_URL:-https://github.com/joan-code6/Excalidraw-Manager.git}"
 APP_SERVICE_NAME="${APP_SERVICE_NAME:-excalidraw-manager.service}"
 WATCHER_SERVICE_NAME="${WATCHER_SERVICE_NAME:-excalidraw-manager-autodeploy.service}"
 
+# Avoid Git "dubious ownership" errors when services run as root.
+git config --global --add safe.directory "${REPO_DIR}" >/dev/null 2>&1 || true
+if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+  sudo -u "${SUDO_USER}" git config --global --add safe.directory "${REPO_DIR}" >/dev/null 2>&1 || true
+fi
+
 cat >/etc/systemd/system/${APP_SERVICE_NAME} <<EOF
 [Unit]
 Description=Excalidraw Manager Preview Server
@@ -49,6 +55,7 @@ Environment=BRANCH=${BRANCH}
 Environment=REPO_DIR=${REPO_DIR}
 Environment=REPO_URL=${REPO_URL}
 Environment=POLL_INTERVAL_SECONDS=30
+Environment=STATE_FILE=${REPO_DIR}/.git/excalidraw-manager-last-deployed-sha
 Environment=APP_SERVICE_NAME=${APP_SERVICE_NAME}
 
 [Install]

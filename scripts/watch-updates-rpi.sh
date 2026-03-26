@@ -5,7 +5,7 @@ REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BRANCH="${BRANCH:-main}"
 REPO_URL="${REPO_URL:-https://github.com/joan-code6/Excalidraw-Manager.git}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-30}"
-STATE_FILE="${STATE_FILE:-${REPO_DIR}/.last-deployed-sha}"
+STATE_FILE="${STATE_FILE:-${REPO_DIR}/.git/excalidraw-manager-last-deployed-sha}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-${REPO_DIR}/scripts/deploy-rpi.sh}"
 
 log() {
