@@ -42,9 +42,9 @@ Set your Cloudflare tunnel ingress to:
 
 ```yaml
 ingress:
-	- hostname: better-excalidraw.arg-server.de
-		service: http://127.0.0.1:4173
-	- service: http_status:404
+  - hostname: better-excalidraw.arg-server.de
+    service: http://127.0.0.1:4173
+  - service: http_status:404
 ```
 
 Then restart cloudflared:
@@ -67,3 +67,60 @@ journalctl -u excalidraw-manager.service -f
 # Run deploy manually
 bash ./scripts/deploy-rpi.sh
 ```
+
+## Cloudflare Tunnel Setup (pi-server)
+
+If you already have a connected tunnel named `pi-server`, run these commands on your Raspberry Pi.
+
+### 1) Route DNS for your hostname
+
+```bash
+cloudflared tunnel route dns pi-server better-excalidraw.arg-server.de
+```
+
+### 2) Configure cloudflared ingress
+
+```bash
+sudo mkdir -p /etc/cloudflared
+sudo tee /etc/cloudflared/config.yml > /dev/null << 'EOF'
+tunnel: 1dd060e4-ae05-421d-850a-60a6c1cb0184
+credentials-file: /home/bennet/.cloudflared/1dd060e4-ae05-421d-850a-60a6c1cb0184.json
+
+ingress:
+  - hostname: better-excalidraw.arg-server.de
+    service: http://127.0.0.1:4173
+  - service: http_status:404
+EOF
+```
+
+### 3) Restart cloudflared
+
+```bash
+sudo systemctl restart cloudflared
+sudo systemctl status cloudflared --no-pager
+```
+
+### 4) Verify app service + local endpoint
+
+```bash
+sudo systemctl status excalidraw-manager.service --no-pager
+curl -I http://127.0.0.1:4173
+```
+
+### 5) Check tunnel logs
+
+```bash
+sudo journalctl -u cloudflared -n 50 --no-pager
+```
+
+Then open:
+
+`https://better-excalidraw.arg-server.de`
+
+### If credentials-file path is wrong
+
+```bash
+ls -la /home/bennet/.cloudflared
+```
+
+Pick the matching `.json` file and update `credentials-file` in `/etc/cloudflared/config.yml`.

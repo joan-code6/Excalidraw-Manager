@@ -21,7 +21,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${REPO_DIR}
-ExecStart=/usr/bin/npm run preview -- --host 127.0.0.1 --port ${APP_PORT}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env npm run preview -- --host 127.0.0.1 --port ${APP_PORT}
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -39,6 +40,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${REPO_DIR}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/bin/bash ${REPO_DIR}/scripts/watch-updates-rpi.sh
 Restart=always
 RestartSec=10
