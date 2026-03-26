@@ -10,15 +10,20 @@ import '@excalidraw/excalidraw/index.css';
 interface CanvasEditorProps {
   canvas: ExcalidrawCanvas;
   onSave: (data: string) => void;
+  onRename: (name: string) => void;
   onBack: () => void;
 }
 
-export function CanvasEditor({ canvas, onSave, onBack }: CanvasEditorProps) {
+export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorProps) {
   const excalidrawAPI = useRef<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(canvas.name);
   const { theme, setTheme } = useTheme();
+
+  useEffect(() => {
+    setNewName(canvas.name);
+  }, [canvas.id, canvas.name]);
 
   const resolvedTheme = useMemo(() => {
     if (theme === 'system') {
@@ -79,10 +84,19 @@ export function CanvasEditor({ canvas, onSave, onBack }: CanvasEditorProps) {
   };
 
   const handleRename = () => {
-    if (newName.trim()) {
-      // This would need to be passed up to parent to handle
+    const trimmedName = newName.trim();
+    if (!trimmedName) {
+      setNewName(canvas.name);
       setIsRenaming(false);
+      return;
     }
+
+    if (trimmedName !== canvas.name) {
+      onRename(trimmedName);
+    }
+
+    setNewName(trimmedName);
+    setIsRenaming(false);
   };
 
   // Auto-save every 5 seconds and when window closes
@@ -162,9 +176,13 @@ export function CanvasEditor({ canvas, onSave, onBack }: CanvasEditorProps) {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   className="h-8"
+                  onBlur={handleRename}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleRename();
-                    if (e.key === 'Escape') setIsRenaming(false);
+                    if (e.key === 'Escape') {
+                      setNewName(canvas.name);
+                      setIsRenaming(false);
+                    }
                   }}
                   autoFocus
                 />

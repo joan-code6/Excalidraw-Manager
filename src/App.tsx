@@ -53,6 +53,17 @@ export function App() {
             }
           }
         }}
+        onRename={(name) => {
+          if (!activeCanvasId) {
+            return;
+          }
+
+          if (isTempCanvasActive) {
+            setTempCanvas((prev) => (prev ? { ...prev, name, updatedAt: Date.now() } : prev));
+          } else {
+            updateCanvas(activeCanvasId, { name });
+          }
+        }}
         onBack={() => {
           if (isTempCanvasActive) {
             setTempCanvas(null);
