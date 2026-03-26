@@ -8,6 +8,28 @@ POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-30}"
 STATE_FILE="${STATE_FILE:-${REPO_DIR}/.git/excalidraw-manager-last-deployed-sha}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-${REPO_DIR}/scripts/deploy-rpi.sh}"
 
+git_safe() {
+  git -c safe.directory="${REPO_DIR}" "$@"
+}
+
+resolve_branch() {
+  local requested_branch="$1"
+  if git ls-remote --exit-code --heads origin "refs/heads/${requested_branch}" >/dev/null 2>&1; then
+    printf '%s\n' "${requested_branch}"
+    return 0
+  fi
+
+  local detected_branch
+  detected_branch="$(git ls-remote --symref origin HEAD 2>/dev/null | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2; exit}')"
+  if [[ -n "${detected_branch}" ]]; then
+    log "Branch '${requested_branch}' not found on origin; using '${detected_branch}'"
+    printf '%s\n' "${detected_branch}"
+    return 0
+  fi
+
+  return 1
+}
+
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
@@ -24,9 +46,14 @@ fi
 
 cd "${REPO_DIR}"
 
-if ! git remote get-url origin >/dev/null 2>&1; then
+if ! git_safe remote get-url origin >/dev/null 2>&1; then
   log "Missing git remote origin, adding ${REPO_URL}"
-  git remote add origin "${REPO_URL}"
+  git_safe remote add origin "${REPO_URL}"
+fi
+
+if ! BRANCH="$(resolve_branch "${BRANCH}")"; then
+  log "Could not resolve a watch branch from origin. Check remote '${REPO_URL}'."
+  exit 1
 fi
 
 log "Watching origin/${BRANCH} every ${POLL_INTERVAL_SECONDS}s"
