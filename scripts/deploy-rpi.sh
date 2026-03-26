@@ -5,13 +5,47 @@ REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BRANCH="${BRANCH:-main}"
 REPO_URL="${REPO_URL:-https://github.com/joan-code6/Excalidraw-Manager.git}"
 APP_SERVICE_NAME="${APP_SERVICE_NAME:-excalidraw-manager.service}"
+MIN_FREE_MB="${MIN_FREE_MB:-1200}"
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+free_mb() {
+  df -Pm "${REPO_DIR}" | awk 'NR==2 {print $4}'
+}
+
+cleanup_space() {
+  log "Low disk space detected, attempting cleanup"
+  npm cache clean --force >/dev/null 2>&1 || true
+  rm -rf "${HOME}/.npm/_cacache" >/dev/null 2>&1 || true
+  rm -rf "${REPO_DIR}/node_modules/.cache" >/dev/null 2>&1 || true
+  if command -v journalctl >/dev/null 2>&1; then
+    sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get clean >/dev/null 2>&1 || true
+  fi
+}
+
+ensure_free_space() {
+  local current_free
+  current_free="$(free_mb)"
+  if [[ "${current_free}" -lt "${MIN_FREE_MB}" ]]; then
+    cleanup_space
+    current_free="$(free_mb)"
+  fi
+
+  if [[ "${current_free}" -lt "${MIN_FREE_MB}" ]]; then
+    log "Not enough disk space: ${current_free}MB free, need at least ${MIN_FREE_MB}MB"
+    exit 1
+  fi
+}
+
 log "Starting deploy in ${REPO_DIR} on branch ${BRANCH}"
 cd "${REPO_DIR}"
+
+ensure_free_space
 
 if ! command -v git >/dev/null 2>&1; then
   log "git is required but not installed."
@@ -56,6 +90,7 @@ log "Installing dependencies"
 if ! npm ci --include=optional; then
   log "npm ci failed, retrying with clean install to recover optional native bindings"
   rm -rf node_modules
+  ensure_free_space
   npm install --include=optional
 fi
 

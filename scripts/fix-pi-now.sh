@@ -5,6 +5,34 @@ REPO_DIR="/home/bennet/production/Excalidraw-Manager"
 APP_SERVICE="excalidraw-manager"
 CF_SERVICE="cloudflared"
 REPO_URL="https://github.com/joan-code6/Excalidraw-Manager.git"
+MIN_FREE_MB="1200"
+
+free_mb() {
+  df -Pm "$REPO_DIR" | awk 'NR==2 {print $4}'
+}
+
+cleanup_space() {
+  npm cache clean --force >/dev/null 2>&1 || true
+  rm -rf "$HOME/.npm/_cacache" >/dev/null 2>&1 || true
+  rm -rf "$REPO_DIR/node_modules/.cache" >/dev/null 2>&1 || true
+  sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+  sudo apt-get clean >/dev/null 2>&1 || true
+}
+
+ensure_free_space() {
+  local current_free
+  current_free="$(free_mb)"
+  if [[ "$current_free" -lt "$MIN_FREE_MB" ]]; then
+    echo "Low disk space detected (${current_free}MB). Cleaning up."
+    cleanup_space
+    current_free="$(free_mb)"
+  fi
+
+  if [[ "$current_free" -lt "$MIN_FREE_MB" ]]; then
+    echo "Not enough disk space (${current_free}MB). Need at least ${MIN_FREE_MB}MB free."
+    exit 1
+  fi
+}
 
 cd "$REPO_DIR"
 
@@ -36,9 +64,11 @@ echo "Node: $(node -v)"
 echo "NPM: $(npm -v)"
 
 echo "Step 3: install deps and build"
+ensure_free_space
 if ! npm ci --include=optional; then
   echo "npm ci failed, retrying with clean install"
   rm -rf node_modules
+  ensure_free_space
   npm install --include=optional
 fi
 npm run build
