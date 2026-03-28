@@ -19,6 +19,7 @@ export function useCanvases() {
   const [loading, setLoading] = useState(true);
   const remoteHydratedRef = useRef(false);
   const previousCanvasIdsRef = useRef<string[]>([]);
+  const previousCanvasUpdatedAtRef = useRef<Map<string, number>>(new Map());
   const syncingRef = useRef(false);
   const syncBlockedReasonRef = useRef<string | null>(null);
 
@@ -120,6 +121,9 @@ export function useCanvases() {
 
         remoteHydratedRef.current = true;
         previousCanvasIdsRef.current = merged.map((c) => c.id);
+        previousCanvasUpdatedAtRef.current = new Map(
+          merged.map((canvas) => [canvas.id, canvas.updatedAt || 0])
+        );
       } catch (err) {
         if (err instanceof CanvasSyncError) {
           blockCloudSync(err.message);
@@ -154,12 +158,21 @@ export function useCanvases() {
 
         const currentIds = new Set(canvases.map((c) => c.id));
         const previousIds = previousCanvasIdsRef.current;
+        const previousUpdatedAtMap = previousCanvasUpdatedAtRef.current;
+        const nextUpdatedAtMap = new Map<string, number>();
 
         for (const canvas of canvases) {
           if (cancelled) {
             return;
           }
-          await upsertCanvas(user.$id, canvas);
+
+          const canvasUpdatedAt = canvas.updatedAt || 0;
+          const previousUpdatedAt = previousUpdatedAtMap.get(canvas.id);
+          if (previousUpdatedAt !== canvasUpdatedAt) {
+            await upsertCanvas(user.$id, canvas);
+          }
+
+          nextUpdatedAtMap.set(canvas.id, canvasUpdatedAt);
         }
 
         for (const previousId of previousIds) {
@@ -172,6 +185,7 @@ export function useCanvases() {
         }
 
         previousCanvasIdsRef.current = [...currentIds];
+        previousCanvasUpdatedAtRef.current = nextUpdatedAtMap;
       } catch (err) {
         if (!cancelled) {
           if (err instanceof CanvasSyncError) {
