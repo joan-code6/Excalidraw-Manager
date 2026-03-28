@@ -31,7 +31,7 @@ resolve_branch() {
 }
 
 log() {
-  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 }
 
 if ! command -v git >/dev/null 2>&1; then
