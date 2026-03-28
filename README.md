@@ -1,6 +1,33 @@
 # Excalidraw Manager
 A simple tool to use Excalidraw with many Canvases at the same time, and to manage them easily.
 
+## Appwrite Sync Setup (Google login + server-side DB)
+
+Create a `.env` file in the project root with:
+
+```env
+VITE_APPWRITE_PROJECT_ID=69c7b77400253c2cdd7b
+VITE_APPWRITE_PROJECT_NAME=Better Excalidraw
+VITE_APPWRITE_ENDPOINT=https://fra.cloud.appwrite.io/v1
+VITE_APPWRITE_DATABASE_ID=YOUR_DATABASE_ID
+VITE_APPWRITE_CANVASES_COLLECTION_ID=YOUR_COLLECTION_ID
+```
+
+Required Appwrite collection attributes for canvases:
+
+- `userId` (string, required)
+- `name` (string, required)
+- `description` (string, required or optional; app sends empty string if missing)
+- `project` (string, required)
+- `data` (string, required)
+- `createdAt` (integer, required)
+- `updatedAt` (integer, required)
+
+How sync works:
+
+- Signed out: data stays local in browser localStorage.
+- Signed in with Google: local + remote canvases are merged (newer `updatedAt` wins), then changes are synced to Appwrite Database.
+
 ## Raspberry Pi Auto Deploy (GitHub -> Cloudflare Tunnel)
 
 This repo includes scripts that keep your Raspberry Pi deployment updated whenever new commits reach GitHub.

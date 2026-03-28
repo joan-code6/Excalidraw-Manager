@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import SignInButton from '@/components/ui/signin';
 import { Input } from '@/components/ui/input';
 import { Plus, Trash2, FileText, Moon, Sun, Search, FolderPlus, FlaskConical, FolderOpen, Users, ArrowLeft, MoreVertical, Check, ChevronDown } from 'lucide-react';
 import type { CanvasListItem } from '@/types/canvas';
@@ -188,7 +189,8 @@ export function CanvasGallery({
                 <Moon className="size-5" />
               )}
             </Button>
-
+            
+            <SignInButton />
             <div className="relative">
               <div className="inline-flex items-center">
                 <Button

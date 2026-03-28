@@ -1,5 +1,13 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ExcalidrawCanvas, CanvasListItem } from '@/types/canvas';
+import { useAuth } from '@/hooks/useAuth';
+import { APPWRITE_DB_ENABLED } from '@/lib/appwrite';
+import {
+  CanvasSyncError,
+  deleteCanvasDocument,
+  listUserCanvases,
+  upsertCanvas,
+} from '@/lib/canvasSyncDb';
 
 const STORAGE_KEY = 'excalidraw-canvases';
 const PROJECTS_STORAGE_KEY = 'excalidraw-projects';
@@ -9,6 +17,18 @@ export function useCanvases() {
   const [canvases, setCanvases] = useState<ExcalidrawCanvas[]>([]);
   const [projects, setProjects] = useState<string[]>([DEFAULT_PROJECT]);
   const [loading, setLoading] = useState(true);
+  const remoteHydratedRef = useRef(false);
+  const previousCanvasIdsRef = useRef<string[]>([]);
+  const syncingRef = useRef(false);
+  const syncBlockedReasonRef = useRef<string | null>(null);
+
+  const blockCloudSync = useCallback((reason: string) => {
+    if (syncBlockedReasonRef.current) {
+      return;
+    }
+    syncBlockedReasonRef.current = reason;
+    console.warn(`Cloud sync disabled for this session: ${reason}`);
+  }, []);
 
   // Load canvases from localStorage on mount
   useEffect(() => {
@@ -50,6 +70,126 @@ export function useCanvases() {
       console.error('Failed to save canvases:', error);
     }
   }, []);
+
+  // When signed in and DB is configured, merge local data with server data.
+  const { user } = useAuth();
+  const canSyncWithDb = useMemo(
+    () => Boolean(APPWRITE_DB_ENABLED && user?.$id),
+    [user]
+  );
+
+  useEffect(() => {
+    if (!canSyncWithDb || !user?.$id) {
+      remoteHydratedRef.current = false;
+      syncBlockedReasonRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const remoteCanvases = await listUserCanvases(user.$id);
+
+        const stored = localStorage.getItem(STORAGE_KEY);
+        let localCanvases: ExcalidrawCanvas[] = [];
+        if (stored) {
+          try {
+            localCanvases = JSON.parse(stored) as ExcalidrawCanvas[];
+          } catch (err) {
+            console.error('Failed to parse local canvases for merge:', err);
+          }
+        }
+
+        // Merge by id preferring the newest updatedAt
+        const map = new Map<string, ExcalidrawCanvas>();
+        localCanvases.forEach((c) => map.set(c.id, c));
+        remoteCanvases.forEach((c) => {
+          const existing = map.get(c.id);
+          if (!existing || (c.updatedAt && c.updatedAt > existing.updatedAt)) {
+            map.set(c.id, c);
+          }
+        });
+
+        const merged = Array.from(map.values()).sort(
+          (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+        );
+        if (!cancelled && merged.length > 0) {
+          saveCanvases(merged);
+        }
+
+        remoteHydratedRef.current = true;
+        previousCanvasIdsRef.current = merged.map((c) => c.id);
+      } catch (err) {
+        if (err instanceof CanvasSyncError) {
+          blockCloudSync(err.message);
+        } else {
+          console.error('Failed to sync canvases from Appwrite DB:', err);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [blockCloudSync, canSyncWithDb, saveCanvases, user?.$id]);
+
+  // Push local changes to Appwrite DB when signed in.
+  useEffect(() => {
+    if (
+      !canSyncWithDb ||
+      !user?.$id ||
+      !remoteHydratedRef.current ||
+      syncingRef.current ||
+      Boolean(syncBlockedReasonRef.current)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const t = setTimeout(async () => {
+      try {
+        syncingRef.current = true;
+
+        const currentIds = new Set(canvases.map((c) => c.id));
+        const previousIds = previousCanvasIdsRef.current;
+
+        for (const canvas of canvases) {
+          if (cancelled) {
+            return;
+          }
+          await upsertCanvas(user.$id, canvas);
+        }
+
+        for (const previousId of previousIds) {
+          if (cancelled) {
+            return;
+          }
+          if (!currentIds.has(previousId)) {
+            await deleteCanvasDocument(previousId);
+          }
+        }
+
+        previousCanvasIdsRef.current = [...currentIds];
+      } catch (err) {
+        if (!cancelled) {
+          if (err instanceof CanvasSyncError) {
+            blockCloudSync(err.message);
+          } else {
+            console.error('Failed to sync canvases to Appwrite DB:', err);
+          }
+        }
+      } finally {
+        syncingRef.current = false;
+      }
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [blockCloudSync, canvases, canSyncWithDb, user?.$id]);
 
   const createCanvas = useCallback(
     (name: string, description?: string, project = DEFAULT_PROJECT) => {

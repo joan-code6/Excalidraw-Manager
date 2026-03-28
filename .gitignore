@@ -25,3 +25,4 @@ dist-ssr
 
 # Legacy watcher state file (new location is under .git metadata)
 .last-deployed-sha
+.env
