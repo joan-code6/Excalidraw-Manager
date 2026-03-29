@@ -32,6 +32,8 @@ export class CanvasSyncError extends Error {
   }
 }
 
+export type CanvasUpsertMode = 'auto' | 'prefer-create' | 'prefer-update';
+
 function toCanvasSyncError(error: unknown): CanvasSyncError {
   if (error instanceof CanvasSyncError) {
     return error;
@@ -141,7 +143,7 @@ export async function listUserCanvases(userId: string): Promise<ExcalidrawCanvas
   return all.map(toCanvas);
 }
 
-export async function upsertCanvas(userId: string, canvas: ExcalidrawCanvas): Promise<void> {
+async function createCanvasDocument(userId: string, canvas: ExcalidrawCanvas): Promise<void> {
   const config = getConfig();
   if (!config) {
     return;
@@ -149,24 +151,78 @@ export async function upsertCanvas(userId: string, canvas: ExcalidrawCanvas): Pr
 
   const payload = toPayload(userId, canvas);
 
-  try {
-    await databases.updateDocument(config.databaseId, config.collectionId, canvas.id, payload);
-  } catch (error) {
-    const syncError = toCanvasSyncError(error);
-    if (syncError.statusCode && syncError.statusCode !== 404) {
-      throw syncError;
-    }
+  await databases.createDocument(config.databaseId, config.collectionId, canvas.id || ID.unique(), payload, [
+    Permission.read(Role.user(userId)),
+    Permission.update(Role.user(userId)),
+    Permission.delete(Role.user(userId)),
+  ]);
+}
 
-    try {
-      await databases.createDocument(config.databaseId, config.collectionId, canvas.id || ID.unique(), payload, [
-        Permission.read(Role.user(userId)),
-        Permission.update(Role.user(userId)),
-        Permission.delete(Role.user(userId)),
-      ]);
-    } catch (createError) {
-      throw toCanvasSyncError(createError);
-    }
+async function updateCanvasDocument(userId: string, canvas: ExcalidrawCanvas): Promise<void> {
+  const config = getConfig();
+  if (!config) {
+    return;
   }
+
+  const payload = toPayload(userId, canvas);
+  await databases.updateDocument(config.databaseId, config.collectionId, canvas.id, payload);
+}
+
+export async function upsertCanvas(
+  userId: string,
+  canvas: ExcalidrawCanvas,
+  mode: CanvasUpsertMode = 'auto'
+): Promise<void> {
+  const config = getConfig();
+  if (!config) {
+    return;
+  }
+
+  const tryUpdateThenCreate = async () => {
+    try {
+      await updateCanvasDocument(userId, canvas);
+    } catch (error) {
+      const syncError = toCanvasSyncError(error);
+      if (syncError.statusCode && syncError.statusCode !== 404) {
+        throw syncError;
+      }
+
+      try {
+        await createCanvasDocument(userId, canvas);
+      } catch (createError) {
+        throw toCanvasSyncError(createError);
+      }
+    }
+  };
+
+  const tryCreateThenUpdate = async () => {
+    try {
+      await createCanvasDocument(userId, canvas);
+    } catch (error) {
+      const syncError = toCanvasSyncError(error);
+      if (syncError.statusCode && syncError.statusCode !== 409) {
+        throw syncError;
+      }
+
+      try {
+        await updateCanvasDocument(userId, canvas);
+      } catch (updateError) {
+        throw toCanvasSyncError(updateError);
+      }
+    }
+  };
+
+  if (mode === 'prefer-create') {
+    await tryCreateThenUpdate();
+    return;
+  }
+
+  if (mode === 'prefer-update') {
+    await tryUpdateThenCreate();
+    return;
+  }
+
+  await tryUpdateThenCreate();
 }
 
 export async function deleteCanvasDocument(canvasId: string): Promise<void> {
