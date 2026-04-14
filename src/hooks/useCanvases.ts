@@ -217,21 +217,35 @@ export function useCanvases() {
   }, [])
 
   // Save canvases to localStorage whenever they change
-  const saveCanvases = useCallback((updatedCanvases: ExcalidrawCanvas[]) => {
-    try {
-      const normalized = normalizeCanvases(updatedCanvases)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
-      setCanvases(normalized)
+  const saveCanvases = useCallback(
+    (
+      updatedCanvases:
+        | ExcalidrawCanvas[]
+        | ((currentCanvases: ExcalidrawCanvas[]) => ExcalidrawCanvas[])
+    ) => {
+      try {
+        setCanvases((currentCanvases) => {
+          const nextCanvases =
+            typeof updatedCanvases === "function"
+              ? updatedCanvases(currentCanvases)
+              : updatedCanvases
+          const normalized = normalizeCanvases(nextCanvases)
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
 
-      setProjects((prev) => {
-        const next = mergeProjectsWithDerived(prev, normalized)
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
-        return next
-      })
-    } catch (error) {
-      console.error("Failed to save canvases:", error)
-    }
-  }, [])
+          setProjects((prev) => {
+            const next = mergeProjectsWithDerived(prev, normalized)
+            localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+            return next
+          })
+
+          return normalized
+        })
+      } catch (error) {
+        console.error("Failed to save canvases:", error)
+      }
+    },
+    []
+  )
 
   // When signed in and DB is configured, merge local data with server data.
   const { user } = useAuth()
@@ -524,10 +538,10 @@ export function useCanvases() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
-      saveCanvases([...canvases, newCanvas])
+      saveCanvases((currentCanvases) => [...currentCanvases, newCanvas])
       return newCanvas
     },
-    [canvases, saveCanvases]
+    [saveCanvases]
   )
 
   const addProject = useCallback((name: string) => {
@@ -548,16 +562,17 @@ export function useCanvases() {
   const moveCanvasToProject = useCallback(
     (id: string, project: string) => {
       const targetProject = project.trim() || DEFAULT_PROJECT
-      const updated = canvases.map((canvas) =>
-        canvas.id === id
-          ? {
-              ...canvas,
-              project: targetProject,
-              updatedAt: Date.now(),
-            }
-          : canvas
+      saveCanvases((currentCanvases) =>
+        currentCanvases.map((canvas) =>
+          canvas.id === id
+            ? {
+                ...canvas,
+                project: targetProject,
+                updatedAt: Date.now(),
+              }
+            : canvas
+        )
       )
-      saveCanvases(updated)
 
       setProjects((prev) => {
         if (prev.includes(targetProject)) {
@@ -568,7 +583,7 @@ export function useCanvases() {
         return next
       })
     },
-    [canvases, saveCanvases]
+    [saveCanvases]
   )
 
   const deleteProject = useCallback(
@@ -577,16 +592,17 @@ export function useCanvases() {
         return
       }
 
-      const updatedCanvases = canvases.map((canvas) =>
-        canvas.project === name
-          ? {
-              ...canvas,
-              project: DEFAULT_PROJECT,
-              updatedAt: Date.now(),
-            }
-          : canvas
+      saveCanvases((currentCanvases) =>
+        currentCanvases.map((canvas) =>
+          canvas.project === name
+            ? {
+                ...canvas,
+                project: DEFAULT_PROJECT,
+                updatedAt: Date.now(),
+              }
+            : canvas
+        )
       )
-      saveCanvases(updatedCanvases)
 
       setProjects((prev) => {
         const next = prev.filter((project) => project !== name)
@@ -594,7 +610,7 @@ export function useCanvases() {
         return next
       })
     },
-    [canvases, saveCanvases]
+    [saveCanvases]
   )
 
   const renameProject = useCallback(
@@ -603,36 +619,38 @@ export function useCanvases() {
         return
       }
 
-      const updatedCanvases = canvases.map((canvas) =>
-        canvas.project === oldName
-          ? {
-              ...canvas,
-              project: newName,
-              updatedAt: Date.now(),
-            }
-          : canvas
+      saveCanvases((currentCanvases) =>
+        currentCanvases.map((canvas) =>
+          canvas.project === oldName
+            ? {
+                ...canvas,
+                project: newName,
+                updatedAt: Date.now(),
+              }
+            : canvas
+        )
       )
-      saveCanvases(updatedCanvases)
 
       setProjects((prev) => prev.map((p) => (p === oldName ? newName : p)))
     },
-    [canvases, saveCanvases]
+    [saveCanvases]
   )
 
   const updateCanvas = useCallback(
     (id: string, updates: Partial<ExcalidrawCanvas>) => {
-      const updated = canvases.map((canvas) =>
-        canvas.id === id
-          ? {
-              ...canvas,
-              ...updates,
-              updatedAt: Date.now(),
-            }
-          : canvas
+      saveCanvases((currentCanvases) =>
+        currentCanvases.map((canvas) =>
+          canvas.id === id
+            ? {
+                ...canvas,
+                ...updates,
+                updatedAt: Date.now(),
+              }
+            : canvas
+        )
       )
-      saveCanvases(updated)
     },
-    [canvases, saveCanvases]
+    [saveCanvases]
   )
 
   const deleteCanvas = useCallback(
@@ -640,10 +658,11 @@ export function useCanvases() {
       const deletedAt = Date.now()
       pendingDeleteIdsRef.current.set(id, deletedAt)
       deleteTombstonesRef.current.set(id, deletedAt)
-      const updated = canvases.filter((canvas) => canvas.id !== id)
-      saveCanvases(updated)
+      saveCanvases((currentCanvases) =>
+        currentCanvases.filter((canvas) => canvas.id !== id)
+      )
     },
-    [canvases, saveCanvases]
+    [saveCanvases]
   )
 
   const getCanvas = useCallback(
