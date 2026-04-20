@@ -90,6 +90,7 @@ function SharePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sharedCanvas, setSharedCanvas] = useState<ExcalidrawCanvas | null>(null)
+  const [isEditableShare, setIsEditableShare] = useState(false)
 
   useEffect(() => {
     const loadSharedCanvas = async () => {
@@ -105,6 +106,8 @@ function SharePage() {
           setError("Share not found")
           return
         }
+
+        setIsEditableShare(share.access === 'edit')
 
         // Create a canvas object from the share data
         setSharedCanvas({
@@ -155,6 +158,7 @@ function SharePage() {
     <CanvasViewer
       canvas={sharedCanvas}
       shareId={shareId}
+      editable={isEditableShare}
       onBack={() => navigate("/")}
     />
   )

@@ -226,34 +226,6 @@ export function useCanvases() {
     console.warn(`Cloud sync disabled for this session: ${reason}`)
   }, [])
 
-  const queueSyncConflict = useCallback(
-    (localCanvas: ExcalidrawCanvas, remoteCanvas: ExcalidrawCanvas | null) => {
-      const existingConflictId = conflictByCanvasIdRef.current.get(localCanvas.id)
-      if (existingConflictId) {
-        return existingConflictId
-      }
-
-      const conflict: CanvasSyncConflict = {
-        id: `conflict-${localCanvas.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        canvasId: localCanvas.id,
-        canvasName: localCanvas.name,
-        localUpdatedAt: localCanvas.updatedAt || 0,
-        remoteUpdatedAt: remoteCanvas?.updatedAt || 0,
-        remoteDeleted: remoteCanvas === null,
-      }
-
-      conflictByCanvasIdRef.current.set(localCanvas.id, conflict.id)
-      conflictContextRef.current.set(conflict.id, {
-        conflict,
-        localCanvas,
-        remoteCanvas,
-      })
-      setSyncConflicts((prev) => [...prev, conflict])
-      return conflict.id
-    },
-    []
-  )
-
   // Load canvases from localStorage on mount
   useEffect(() => {
     const loadCanvases = () => {
@@ -586,6 +558,17 @@ export function useCanvases() {
       return
     }
 
+    if (
+      syncConflicts.length > 0 ||
+      conflictByCanvasIdRef.current.size > 0 ||
+      conflictContextRef.current.size > 0
+    ) {
+      conflictByCanvasIdRef.current = new Map()
+      conflictContextRef.current = new Map()
+      forceOverwriteCanvasIdsRef.current = new Set()
+      setSyncConflicts([])
+    }
+
     let cancelled = false
 
     const t = setTimeout(async () => {
@@ -599,6 +582,7 @@ export function useCanvases() {
         const previousUpdatedAtMap = previousCanvasUpdatedAtRef.current
         const nextUpdatedAtMap = new Map<string, number>()
         const nextKnownRemoteIds = new Set<string>()
+        const remoteAdoptions = new Map<string, ExcalidrawCanvas>()
 
         const pendingDeleteEntries = [...pendingDeleteIdsRef.current.entries()]
         const deletedThisCycle = new Set<string>()
@@ -673,14 +657,27 @@ export function useCanvases() {
                 continue
               }
 
-              queueSyncConflict(canvas, remoteCanvas)
-              if (remoteCanvas) {
+              // Automatic conflict handling:
+              // 1) Remote deleted: re-create from local edit.
+              // 2) Remote newer: accept remote into local store.
+              // 3) Local newer or equal: overwrite remote with local.
+              if (remoteCanvas === null) {
+                await upsertCanvas(user.$id, canvas, "prefer-create")
                 nextKnownRemoteIds.add(canvas.id)
-              }
-              if (previousUpdatedAt !== undefined) {
-                nextUpdatedAtMap.set(canvas.id, previousUpdatedAt)
+                nextUpdatedAtMap.set(canvas.id, canvasUpdatedAt)
+                continue
               }
 
+              if (remoteUpdatedAt > canvasUpdatedAt) {
+                remoteAdoptions.set(canvas.id, remoteCanvas)
+                nextKnownRemoteIds.add(canvas.id)
+                nextUpdatedAtMap.set(canvas.id, remoteUpdatedAt)
+                continue
+              }
+
+              await upsertCanvas(user.$id, canvas, "prefer-update")
+              nextKnownRemoteIds.add(canvas.id)
+              nextUpdatedAtMap.set(canvas.id, canvasUpdatedAt)
               continue
             }
 
@@ -696,6 +693,17 @@ export function useCanvases() {
           }
 
           nextUpdatedAtMap.set(canvas.id, canvasUpdatedAt)
+        }
+
+        if (remoteAdoptions.size > 0 && !cancelled) {
+          saveCanvases((currentCanvases) => {
+            const merged = currentCanvases.map((existing) => {
+              const adopted = remoteAdoptions.get(existing.id)
+              return adopted || existing
+            })
+
+            return merged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+          })
         }
 
         for (const previousId of knownRemoteIdSet) {
@@ -736,7 +744,7 @@ export function useCanvases() {
       cancelled = true
       clearTimeout(t)
     }
-  }, [blockCloudSync, canvases, canSyncWithDb, user?.$id])
+  }, [blockCloudSync, canvases, canSyncWithDb, saveCanvases, syncConflicts.length, user?.$id])
 
   const createCanvas = useCallback(
     (name: string, description?: string, project = DEFAULT_PROJECT) => {

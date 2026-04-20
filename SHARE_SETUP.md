@@ -1,6 +1,6 @@
 # Share Feature Setup Guide
 
-The share feature allows users to generate read-only links to their canvases that viewers can access in real-time using Appwrite's live updates.
+The share feature allows users to add collaborators to a canvas by link or by email-labeled invite links, and keep everyone in sync in real-time through Appwrite Realtime.
 
 ## Required Environment Variables
 
@@ -31,20 +31,28 @@ Create the following attributes in the shares collection:
 | `data` | String | Yes | - |
 | `createdAt` | DateTime | Yes | - |
 | `updatedAt` | DateTime | Yes | - |
+| `access` | String | No | `view` |
+| `invitedEmail` | String | No | Empty |
+
+Notes:
+
+- `access` supports `view` and `edit`.
+- `invitedEmail` is optional metadata for email-targeted invite links.
 
 ### 3. Create Indexes (Optional but Recommended)
 
 For better query performance:
 
 - Create an index on `canvasId` for quick lookups
+- Optional: create an index on `access` if you plan to query by permission type later
 
 ### 4. Set Permissions
 
 Set up permissions on the shares collection:
 
-- **Read**: `Any` (public - allows anyone to view shared canvases)
-- **Create**: `Authenticated` or `Any` (depending on your preference)
-- **Update**: `Any` or `Authenticated` (for live updates)
+- **Read**: `Any` (public - allows anyone with link access)
+- **Create**: `Authenticated` (recommended)
+- **Update**: `Any` or `Authenticated` (required for live collaboration updates)
 
 Example permission pattern:
 ```
@@ -54,21 +62,26 @@ users: Any (or Authenticated for write operations)
 
 ## How It Works
 
-1. **Generate Share Link**: When a user clicks the "Share" button in the canvas editor, a new document is created in the shares collection with the current canvas data.
+1. **Generate Share Link**: In the canvas editor, users can create:
+  - View link: read-only shared view.
+  - Edit link: collaborative editing link.
+  - Email invite link: editable link labeled with target email.
 
 2. **Share Link Format**: The generated link looks like: `https://yourapp.com/share/share-{timestamp}-{random}`
 
-3. **Real-time Syncing**: Using Appwrite's real-time feature, when the original canvas is saved, the share document is updated. Viewers automatically see the changes in real-time via the Realtime subscription.
+3. **Real-time Syncing**: The shared page subscribes to the share document via Appwrite Realtime. For editable links, each change is debounced and written back to the share document so all open sessions update live.
 
-4. **Read-only Access**: Viewers see the canvas in view-only mode and cannot make edits.
+4. **Access Mode Enforcement in UI**:
+  - `access=view` opens in view-only mode.
+  - `access=edit` opens in collaborative mode.
 
 ## Architecture
 
 ### Components
 
 - **CanvasEditor**: Added "Share" button to trigger share creation
-- **CanvasViewer**: New read-only viewer component with real-time updates
-- **ShareDialog**: Dialog showing generated share link with copy button
+- **CanvasViewer**: Shared route viewer/editor with real-time updates
+- **ShareDialog**: Dialog to create view/edit/email invite links
 - **canvasShare.ts**: Utilities for creating, updating, and managing shares
 
 ### Database Structure
@@ -79,8 +92,10 @@ users: Any (or Authenticated for write operations)
   "$id": "share-{unique-token}",
   "canvasId": "canvas-{id}",
   "data": "{...serialized canvas data...}",
-  "createdAt": 1234567890,
-  "updatedAt": 1234567890
+  "createdAt": "2026-04-20T12:34:56.789Z",
+  "updatedAt": "2026-04-20T12:34:56.789Z",
+  "access": "view | edit",
+  "invitedEmail": "optional@domain.com"
 }
 ```
 

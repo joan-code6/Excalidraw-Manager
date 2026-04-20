@@ -14,6 +14,8 @@ export interface CanvasShare {
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
   data: string; // Synced canvas data for fast read access
+  access?: 'view' | 'edit';
+  invitedEmail?: string;
 }
 
 export type CanvasListItem = ExcalidrawCanvas;

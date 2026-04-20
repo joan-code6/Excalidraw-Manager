@@ -11,6 +11,7 @@ VITE_APPWRITE_PROJECT_NAME=Better Excalidraw
 VITE_APPWRITE_ENDPOINT=https://fra.cloud.appwrite.io/v1
 VITE_APPWRITE_DATABASE_ID=YOUR_DATABASE_ID
 VITE_APPWRITE_CANVASES_COLLECTION_ID=YOUR_COLLECTION_ID
+VITE_APPWRITE_SHARES_COLLECTION_ID=YOUR_SHARES_COLLECTION_ID
 ```
 
 Required Appwrite collection attributes for canvases:
@@ -23,10 +24,20 @@ Required Appwrite collection attributes for canvases:
 - `createdAt` (integer, required)
 - `updatedAt` (integer, required)
 
+Required Appwrite collection attributes for shares:
+
+- `canvasId` (string, required)
+- `data` (string, required)
+- `createdAt` (DateTime, required)
+- `updatedAt` (DateTime, required)
+- `access` (string, optional: `view` or `edit`)
+- `invitedEmail` (string, optional)
+
 How sync works:
 
 - Signed out: data stays local in browser localStorage.
 - Signed in with Google: local + remote canvases are merged (newer `updatedAt` wins), then changes are synced to Appwrite Database.
+- Share links support view-only and collaborative edit mode with Appwrite Realtime updates.
 
 ## Raspberry Pi Auto Deploy (GitHub -> Cloudflare Tunnel)
 

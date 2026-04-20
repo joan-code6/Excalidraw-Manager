@@ -5,8 +5,10 @@ import { Input } from '@/components/ui/input';
 import type { ExcalidrawCanvas } from '@/types/canvas';
 import { ChevronLeft, Save, Moon, Sun, Share2 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
-import { ShareDialog } from '@/components/ShareDialog';
-import { createCanvasShare, findCanvasShares, getShareUrl, updateAllCanvasShares } from '@/lib/canvasShare';
+import { ShareDialog, type ShareLinkItem } from '@/components/ShareDialog';
+import { createCanvasShare, findCanvasShares, getShareUrl, updateAllCanvasShares, updateEditableCanvasShares } from '@/lib/canvasShare';
+import { mergeSceneSnapshots, parseSceneSnapshot, serializeSceneSnapshot } from '@/lib/canvasRealtimeMerge';
+import { client } from '@/lib/appwrite';
 import '@excalidraw/excalidraw/index.css';
 
 interface CanvasEditorProps {
@@ -18,12 +20,17 @@ interface CanvasEditorProps {
 
 export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorProps) {
   const excalidrawAPI = useRef<any>(null);
+  const pendingCollabPublishTimeoutRef = useRef<number | null>(null);
+  const pendingCollabDataRef = useRef<string | null>(null);
+  const isApplyingRemoteCollabRef = useRef(false);
+  const lastCollabDataRef = useRef<string>(canvas.data);
+  const collabUnsubscribeRef = useRef<(() => void) | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(canvas.name);
   const { theme, setTheme } = useTheme();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [shareLinks, setShareLinks] = useState<string[]>([]);
+  const [shareLinks, setShareLinks] = useState<ShareLinkItem[]>([]);
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [isCreatingShare, setIsCreatingShare] = useState(false);
 
@@ -39,9 +46,31 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
     return rest;
   };
 
+  const serializeSceneForStorage = (elements: any, appState: any, files: any, thumbnail?: string) => {
+    return JSON.stringify({
+      elements,
+      appState: toSerializableAppState(appState),
+      files,
+      ...(thumbnail ? { thumbnail } : {}),
+    });
+  };
+
+  const serializeSceneForShare = (elements: any[], files: Record<string, any>) => {
+    return serializeSceneSnapshot(elements, files);
+  };
+
   useEffect(() => {
     setNewName(canvas.name);
   }, [canvas.id, canvas.name]);
+
+  useEffect(() => {
+    const parsed = parseSceneSnapshot(canvas.data);
+    if (parsed) {
+      lastCollabDataRef.current = serializeSceneForShare(parsed.elements, parsed.files);
+      return;
+    }
+    lastCollabDataRef.current = canvas.data;
+  }, [canvas.data]);
 
   const resolvedTheme = useMemo(() => {
     if (theme === 'system') {
@@ -76,17 +105,13 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
           console.error('Failed to generate thumbnail:', err);
         }
         
-        const data = JSON.stringify({
-          elements,
-          appState: toSerializableAppState(appState),
-          files,
-          thumbnail,
-        });
+        const data = serializeSceneForStorage(elements, appState, files, thumbnail);
+        const shareData = serializeSceneForShare(elements, files);
         
         onSave(data);
         
-        // Update all shares with new data
-        await updateAllCanvasShares(canvas.id, data);
+        // Keep view-only links in sync with saved owner snapshots.
+        await updateAllCanvasShares(canvas.id, shareData, 'view');
         
         // Visual feedback
         setTimeout(() => setIsSaving(false), 500);
@@ -127,9 +152,17 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
     try {
       setIsLoadingShares(true);
       const existingShares = await findCanvasShares(canvas.id);
-      const links = existingShares
-        .map((share) => getShareUrl(share.id))
-        .sort((a, b) => a.localeCompare(b));
+      const links: ShareLinkItem[] = existingShares
+        .map((share) => {
+          const access: ShareLinkItem['access'] = share.access === 'edit' ? 'edit' : 'view';
+          return {
+            id: share.id,
+            url: getShareUrl(share.id),
+            access,
+            invitedEmail: share.invitedEmail,
+          };
+        })
+        .sort((a, b) => a.url.localeCompare(b.url));
       setShareLinks(links);
       setShareDialogOpen(true);
     } catch (error) {
@@ -139,26 +172,30 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
     }
   };
 
-  const handleCreateNewShare = async () => {
+  const handleCreateShare = async (access: 'view' | 'edit', invitedEmail?: string) => {
     if (!excalidrawAPI.current) return;
 
     try {
       setIsCreatingShare(true);
       const elements = excalidrawAPI.current.getSceneElements();
-      const appState = excalidrawAPI.current.getAppState();
       const files = excalidrawAPI.current.getFiles?.() ?? {};
 
-      const shareData = JSON.stringify({
-        elements,
-        appState: toSerializableAppState(appState),
-        files,
-      });
+      const shareData = serializeSceneForShare(elements, files);
 
-      const share = await createCanvasShare(canvas.id, shareData);
+      const share = await createCanvasShare(canvas.id, shareData, {
+        access,
+        invitedEmail,
+      });
       if (!share) return;
 
-      const newLink = getShareUrl(share.id);
-      setShareLinks((prev) => [newLink, ...prev.filter((link) => link !== newLink)]);
+      const newLink: ShareLinkItem = {
+        id: share.id,
+        url: getShareUrl(share.id),
+        access: share.access === 'edit' ? 'edit' : 'view',
+        invitedEmail: share.invitedEmail,
+      };
+
+      setShareLinks((prev) => [newLink, ...prev.filter((link) => link.id !== newLink.id)]);
     } catch (error) {
       console.error('Failed to create share:', error);
     } finally {
@@ -183,6 +220,94 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [excalidrawAPI]);
+
+  // Realtime collaboration bridge in owner editor:
+  // - pull remote updates from editable shares
+  // - push local edits to editable shares (debounced)
+  useEffect(() => {
+    const databaseId = import.meta.env.VITE_APPWRITE_DATABASE_ID;
+    const sharesCollectionId = import.meta.env.VITE_APPWRITE_SHARES_COLLECTION_ID;
+
+    if (!databaseId || !sharesCollectionId || !canvas.id) {
+      return;
+    }
+
+    const unsubscribe = client.subscribe(
+      `databases.${databaseId}.collections.${sharesCollectionId}.documents`,
+      (response: any) => {
+        const payload = response?.payload;
+        if (!payload || payload.canvasId !== canvas.id || !payload.data || !excalidrawAPI.current) {
+          return;
+        }
+
+        const access = payload.access === 'edit' ? 'edit' : 'view';
+        if (access !== 'edit') {
+          return;
+        }
+
+        if (payload.data === lastCollabDataRef.current) {
+          return;
+        }
+
+        try {
+          const remoteSnapshot = parseSceneSnapshot(payload.data);
+          if (!remoteSnapshot) {
+            return;
+          }
+
+          const localSnapshot = {
+            elements: excalidrawAPI.current.getSceneElements?.() || [],
+            files: excalidrawAPI.current.getFiles?.() || {},
+          };
+
+          const mergedSnapshot = mergeSceneSnapshots(localSnapshot, remoteSnapshot);
+
+          isApplyingRemoteCollabRef.current = true;
+          excalidrawAPI.current.updateScene({
+            elements: mergedSnapshot.elements,
+            files: mergedSnapshot.files,
+          });
+
+          const mergedSerialized = serializeSceneForShare(
+            mergedSnapshot.elements,
+            mergedSnapshot.files
+          );
+          lastCollabDataRef.current = mergedSerialized;
+
+          if (pendingCollabDataRef.current) {
+            const pendingSnapshot = parseSceneSnapshot(pendingCollabDataRef.current);
+            if (pendingSnapshot) {
+              const rebasedPending = mergeSceneSnapshots(mergedSnapshot, pendingSnapshot);
+              pendingCollabDataRef.current = serializeSceneForShare(
+                rebasedPending.elements,
+                rebasedPending.files
+              );
+            }
+          }
+
+          window.setTimeout(() => {
+            isApplyingRemoteCollabRef.current = false;
+          }, 0);
+        } catch (error) {
+          console.error('Failed to parse collaboration payload:', error);
+        }
+      }
+    );
+
+    collabUnsubscribeRef.current = () => unsubscribe();
+
+    return () => {
+      if (pendingCollabPublishTimeoutRef.current !== null) {
+        window.clearTimeout(pendingCollabPublishTimeoutRef.current);
+        pendingCollabPublishTimeoutRef.current = null;
+      }
+      pendingCollabDataRef.current = null;
+      if (collabUnsubscribeRef.current) {
+        collabUnsubscribeRef.current();
+        collabUnsubscribeRef.current = null;
+      }
+    };
+  }, [canvas.id]);
 
   let initialData: any = undefined;
   try {
@@ -307,8 +432,36 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
       <div className="flex-1 overflow-hidden">
         <Excalidraw
           key={canvas.id}
-          onChange={() => {
-            // Could add auto-save debouncing here if needed
+          onChange={(elements: any, _appState: any, files: any) => {
+            if (isApplyingRemoteCollabRef.current) {
+              return;
+            }
+
+            const data = serializeSceneForShare(elements, files || {});
+            if (data === lastCollabDataRef.current) {
+              return;
+            }
+
+            if (pendingCollabPublishTimeoutRef.current !== null) {
+              window.clearTimeout(pendingCollabPublishTimeoutRef.current);
+            }
+
+            pendingCollabDataRef.current = data;
+            pendingCollabPublishTimeoutRef.current = window.setTimeout(async () => {
+              const pendingData = pendingCollabDataRef.current;
+              pendingCollabDataRef.current = null;
+
+              if (!pendingData) {
+                return;
+              }
+
+              try {
+                await updateEditableCanvasShares(canvas.id, pendingData);
+                lastCollabDataRef.current = pendingData;
+              } catch (error) {
+                console.error('Failed to publish editor collaboration update:', error);
+              }
+            }, 450);
           }}
           initialData={initialData}
           theme={resolvedTheme}
@@ -324,7 +477,9 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
         canvasName={canvas.name}
         shareLinks={shareLinks}
         isLoadingShares={isLoadingShares}
-        onCreateNewShare={handleCreateNewShare}
+        onCreateViewShare={() => handleCreateShare('view')}
+        onCreateEditShare={() => handleCreateShare('edit')}
+        onInviteByEmail={(email) => handleCreateShare('edit', email)}
         isCreating={isCreatingShare}
       />
     </div>
