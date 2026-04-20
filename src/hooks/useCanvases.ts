@@ -6,6 +6,7 @@ import {
   type CanvasUpsertMode,
   CanvasSyncError,
   deleteCanvasDocument,
+  getCanvasById,
   listUserCanvases,
   upsertCanvas,
 } from "@/lib/canvasSyncDb"
@@ -91,6 +92,47 @@ function createCanvasId() {
   return createShortCanvasId()
 }
 
+function createConflictCanvasName(name: string) {
+  const timestamp = new Date().toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  return `${name} (Conflict copy ${timestamp})`
+}
+
+function createConflictCanvas(source: ExcalidrawCanvas): ExcalidrawCanvas {
+  const now = Date.now()
+  return {
+    ...source,
+    id: createCanvasId(),
+    name: createConflictCanvasName(source.name),
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export type CanvasConflictResolution =
+  | "save-local-as-new"
+  | "overwrite-remote"
+  | "accept-remote"
+
+export interface CanvasSyncConflict {
+  id: string
+  canvasId: string
+  canvasName: string
+  localUpdatedAt: number
+  remoteUpdatedAt: number
+  remoteDeleted: boolean
+}
+
+interface PendingConflictContext {
+  conflict: CanvasSyncConflict
+  localCanvas: ExcalidrawCanvas
+  remoteCanvas: ExcalidrawCanvas | null
+}
+
 function getCloudBaselineStorageKey(userId: string) {
   return `${CLOUD_BASELINE_STORAGE_PREFIX}:${userId}`
 }
@@ -171,6 +213,10 @@ export function useCanvases() {
   const deleteTombstonesRef = useRef<Map<string, number>>(new Map())
   const syncingRef = useRef(false)
   const syncBlockedReasonRef = useRef<string | null>(null)
+  const [syncConflicts, setSyncConflicts] = useState<CanvasSyncConflict[]>([])
+  const conflictByCanvasIdRef = useRef<Map<string, string>>(new Map())
+  const conflictContextRef = useRef<Map<string, PendingConflictContext>>(new Map())
+  const forceOverwriteCanvasIdsRef = useRef<Set<string>>(new Set())
 
   const blockCloudSync = useCallback((reason: string) => {
     if (syncBlockedReasonRef.current) {
@@ -179,6 +225,34 @@ export function useCanvases() {
     syncBlockedReasonRef.current = reason
     console.warn(`Cloud sync disabled for this session: ${reason}`)
   }, [])
+
+  const queueSyncConflict = useCallback(
+    (localCanvas: ExcalidrawCanvas, remoteCanvas: ExcalidrawCanvas | null) => {
+      const existingConflictId = conflictByCanvasIdRef.current.get(localCanvas.id)
+      if (existingConflictId) {
+        return existingConflictId
+      }
+
+      const conflict: CanvasSyncConflict = {
+        id: `conflict-${localCanvas.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        canvasId: localCanvas.id,
+        canvasName: localCanvas.name,
+        localUpdatedAt: localCanvas.updatedAt || 0,
+        remoteUpdatedAt: remoteCanvas?.updatedAt || 0,
+        remoteDeleted: remoteCanvas === null,
+      }
+
+      conflictByCanvasIdRef.current.set(localCanvas.id, conflict.id)
+      conflictContextRef.current.set(conflict.id, {
+        conflict,
+        localCanvas,
+        remoteCanvas,
+      })
+      setSyncConflicts((prev) => [...prev, conflict])
+      return conflict.id
+    },
+    []
+  )
 
   // Load canvases from localStorage on mount
   useEffect(() => {
@@ -247,6 +321,83 @@ export function useCanvases() {
     []
   )
 
+  const resolveSyncConflict = useCallback(
+    (conflictId: string, resolution: CanvasConflictResolution) => {
+      const context = conflictContextRef.current.get(conflictId)
+      if (!context) {
+        return
+      }
+
+      conflictContextRef.current.delete(conflictId)
+      conflictByCanvasIdRef.current.delete(context.conflict.canvasId)
+      setSyncConflicts((prev) => prev.filter((conflict) => conflict.id !== conflictId))
+
+      if (resolution === "overwrite-remote") {
+        forceOverwriteCanvasIdsRef.current.add(context.conflict.canvasId)
+        return
+      }
+
+      if (resolution === "accept-remote") {
+        saveCanvases((currentCanvases) => {
+          const withoutLocal = currentCanvases.filter(
+            (canvas) => canvas.id !== context.conflict.canvasId
+          )
+          if (context.remoteCanvas) {
+            return [context.remoteCanvas, ...withoutLocal].sort(
+              (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+            )
+          }
+          return withoutLocal
+        })
+
+        if (context.remoteCanvas) {
+          knownRemoteIdsRef.current.add(context.conflict.canvasId)
+          previousCanvasUpdatedAtRef.current.set(
+            context.conflict.canvasId,
+            context.remoteCanvas.updatedAt || 0
+          )
+        } else {
+          knownRemoteIdsRef.current.delete(context.conflict.canvasId)
+          previousCanvasUpdatedAtRef.current.delete(context.conflict.canvasId)
+          previousCanvasIdsRef.current = previousCanvasIdsRef.current.filter(
+            (id) => id !== context.conflict.canvasId
+          )
+        }
+        forceOverwriteCanvasIdsRef.current.delete(context.conflict.canvasId)
+        return
+      }
+
+      // save-local-as-new
+      const conflictCopy = createConflictCanvas(context.localCanvas)
+      saveCanvases((currentCanvases) => {
+        const withoutOriginal = currentCanvases.filter(
+          (canvas) => canvas.id !== context.conflict.canvasId
+        )
+        const next = context.remoteCanvas
+          ? [context.remoteCanvas, conflictCopy, ...withoutOriginal]
+          : [conflictCopy, ...withoutOriginal]
+        return next.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      })
+
+      if (context.remoteCanvas) {
+        knownRemoteIdsRef.current.add(context.conflict.canvasId)
+        previousCanvasUpdatedAtRef.current.set(
+          context.conflict.canvasId,
+          context.remoteCanvas.updatedAt || 0
+        )
+      } else {
+        knownRemoteIdsRef.current.delete(context.conflict.canvasId)
+        previousCanvasUpdatedAtRef.current.delete(context.conflict.canvasId)
+        previousCanvasIdsRef.current = previousCanvasIdsRef.current.filter(
+          (id) => id !== context.conflict.canvasId
+        )
+      }
+      previousCanvasUpdatedAtRef.current.delete(conflictCopy.id)
+      forceOverwriteCanvasIdsRef.current.delete(context.conflict.canvasId)
+    },
+    [saveCanvases]
+  )
+
   // When signed in and DB is configured, merge local data with server data.
   const { user } = useAuth()
   const canSyncWithDb = useMemo(
@@ -284,6 +435,10 @@ export function useCanvases() {
       syncBlockedReasonRef.current = null
       baselineLoadedForUserRef.current = null
       knownRemoteIdsRef.current = new Set()
+      conflictByCanvasIdRef.current = new Map()
+      conflictContextRef.current = new Map()
+      forceOverwriteCanvasIdsRef.current = new Set()
+      setSyncConflicts([])
       return
     }
 
@@ -443,6 +598,7 @@ export function useCanvases() {
         const knownRemoteIdSet = new Set(knownRemoteIdsRef.current)
         const previousUpdatedAtMap = previousCanvasUpdatedAtRef.current
         const nextUpdatedAtMap = new Map<string, number>()
+        const nextKnownRemoteIds = new Set<string>()
 
         const pendingDeleteEntries = [...pendingDeleteIdsRef.current.entries()]
         const deletedThisCycle = new Set<string>()
@@ -463,11 +619,26 @@ export function useCanvases() {
           pendingDeleteIdsRef.current.delete(pendingId)
           deletedThisCycle.add(pendingId)
           previousUpdatedAtMap.delete(pendingId)
+          nextKnownRemoteIds.delete(pendingId)
         }
 
         for (const canvas of canvases) {
           if (cancelled) {
             return
+          }
+
+          const hasPendingConflict =
+            conflictByCanvasIdRef.current.has(canvas.id) &&
+            !forceOverwriteCanvasIdsRef.current.has(canvas.id)
+          if (hasPendingConflict) {
+            const previousUpdatedAt = previousUpdatedAtMap.get(canvas.id)
+            if (previousUpdatedAt !== undefined) {
+              nextUpdatedAtMap.set(canvas.id, previousUpdatedAt)
+            }
+            if (knownRemoteIdSet.has(canvas.id) || previousIdSet.has(canvas.id)) {
+              nextKnownRemoteIds.add(canvas.id)
+            }
+            continue
           }
 
           if (pendingDeleteIdsRef.current.has(canvas.id)) {
@@ -476,13 +647,52 @@ export function useCanvases() {
 
           const canvasUpdatedAt = canvas.updatedAt || 0
           const previousUpdatedAt = previousUpdatedAtMap.get(canvas.id)
+          const mightExistRemotely =
+            knownRemoteIdSet.has(canvas.id) ||
+            previousIdSet.has(canvas.id) ||
+            previousUpdatedAt !== undefined
+
           if (previousUpdatedAt !== canvasUpdatedAt) {
-            const upsertMode: CanvasUpsertMode =
-              previousIdSet.has(canvas.id) ||
-              previousUpdatedAtMap.has(canvas.id)
-                ? "prefer-update"
-                : "prefer-create"
+            const remoteCanvas = mightExistRemotely
+              ? await getCanvasById(canvas.id)
+              : null
+            const remoteUpdatedAt = remoteCanvas?.updatedAt || 0
+            const remoteChangedSinceBaseline =
+              remoteCanvas === null
+                ? previousUpdatedAt !== undefined && mightExistRemotely
+                : previousUpdatedAt === undefined
+                  ? true
+                  : remoteUpdatedAt !== previousUpdatedAt
+
+            if (remoteChangedSinceBaseline) {
+              if (forceOverwriteCanvasIdsRef.current.has(canvas.id)) {
+                await upsertCanvas(user.$id, canvas, "prefer-update")
+                forceOverwriteCanvasIdsRef.current.delete(canvas.id)
+                nextKnownRemoteIds.add(canvas.id)
+                nextUpdatedAtMap.set(canvas.id, canvasUpdatedAt)
+                continue
+              }
+
+              queueSyncConflict(canvas, remoteCanvas)
+              if (remoteCanvas) {
+                nextKnownRemoteIds.add(canvas.id)
+              }
+              if (previousUpdatedAt !== undefined) {
+                nextUpdatedAtMap.set(canvas.id, previousUpdatedAt)
+              }
+
+              continue
+            }
+
+            const upsertMode: CanvasUpsertMode = remoteCanvas
+              ? "prefer-update"
+              : "prefer-create"
             await upsertCanvas(user.$id, canvas, upsertMode)
+            nextKnownRemoteIds.add(canvas.id)
+          }
+
+          if (mightExistRemotely) {
+            nextKnownRemoteIds.add(canvas.id)
           }
 
           nextUpdatedAtMap.set(canvas.id, canvasUpdatedAt)
@@ -497,11 +707,12 @@ export function useCanvases() {
           }
           if (!currentIds.has(previousId)) {
             await deleteCanvasDocument(previousId)
+            nextKnownRemoteIds.delete(previousId)
           }
         }
 
-        knownRemoteIdsRef.current = new Set(currentIds)
-        previousCanvasIdsRef.current = [...currentIds]
+        knownRemoteIdsRef.current = new Set(nextKnownRemoteIds)
+        previousCanvasIdsRef.current = canvases.map((c) => c.id)
         previousCanvasUpdatedAtRef.current = nextUpdatedAtMap
         saveCloudBaseline(
           user.$id,
@@ -699,5 +910,7 @@ export function useCanvases() {
     projects,
     getCanvas,
     getCanvasList,
+    syncConflicts,
+    resolveSyncConflict,
   }
 }

@@ -143,6 +143,30 @@ export async function listUserCanvases(userId: string): Promise<ExcalidrawCanvas
   return all.map(toCanvas);
 }
 
+export async function getCanvasById(
+  canvasId: string
+): Promise<ExcalidrawCanvas | null> {
+  const config = getConfig();
+  if (!config) {
+    return null;
+  }
+
+  try {
+    const doc = await databases.getDocument<CanvasDocument>(
+      config.databaseId,
+      config.collectionId,
+      canvasId
+    );
+    return toCanvas(doc);
+  } catch (error) {
+    const syncError = toCanvasSyncError(error);
+    if (syncError.statusCode === 404) {
+      return null;
+    }
+    throw syncError;
+  }
+}
+
 async function createCanvasDocument(userId: string, canvas: ExcalidrawCanvas): Promise<void> {
   const config = getConfig();
   if (!config) {

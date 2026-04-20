@@ -9,9 +9,20 @@ import {
 import { useCanvases } from "@/hooks/useCanvases"
 import { CanvasGallery } from "@/components/CanvasGallery"
 import { CanvasEditor } from "@/components/CanvasEditor"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import type { ExcalidrawCanvas } from "@/types/canvas"
 
-function GalleryPage() {
+type CanvasesApi = ReturnType<typeof useCanvases>
+
+function GalleryPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
   const navigate = useNavigate()
   const { projectId } = useParams()
 
@@ -25,7 +36,7 @@ function GalleryPage() {
     projects,
     deleteCanvas,
     getCanvasList,
-  } = useCanvases()
+  } = canvasesApi
 
   if (loading) {
     return (
@@ -71,13 +82,13 @@ function GalleryPage() {
   )
 }
 
-function EditorPage() {
+function EditorPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
   const navigate = useNavigate()
   const { canvasId } = useParams()
   const [searchParams] = useSearchParams()
   const isTemp = searchParams.get("temp") === "true"
 
-  const { loading, updateCanvas, getCanvas } = useCanvases()
+  const { loading, updateCanvas, getCanvas } = canvasesApi
 
   const [tempCanvas, setTempCanvas] = useState<ExcalidrawCanvas | null>(null)
 
@@ -151,12 +162,88 @@ function EditorPage() {
 }
 
 export function App() {
+  const canvasesApi = useCanvases()
+  const activeConflict = canvasesApi.syncConflicts[0]
+
   return (
-    <Routes>
-      <Route path="/" element={<GalleryPage />} />
-      <Route path="/project/:projectId" element={<GalleryPage />} />
-      <Route path="/canvas/:canvasId" element={<EditorPage />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<GalleryPage canvasesApi={canvasesApi} />} />
+        <Route
+          path="/project/:projectId"
+          element={<GalleryPage canvasesApi={canvasesApi} />}
+        />
+        <Route
+          path="/canvas/:canvasId"
+          element={<EditorPage canvasesApi={canvasesApi} />}
+        />
+      </Routes>
+
+      <Dialog open={Boolean(activeConflict)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Sync conflict detected</DialogTitle>
+            <DialogDescription>
+              {activeConflict ? (
+                activeConflict.remoteDeleted
+                  ? `Canvas "${activeConflict.canvasName}" was changed locally, but it was deleted remotely.`
+                  : `Canvas "${activeConflict.canvasName}" was edited in another session while you also changed it here.`
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeConflict && (
+            <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+              <p>
+                Local update: {new Date(activeConflict.localUpdatedAt).toLocaleString()}
+              </p>
+              <p>
+                Remote update: {activeConflict.remoteDeleted ? "Deleted remotely" : new Date(activeConflict.remoteUpdatedAt).toLocaleString()}
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!activeConflict) return
+                canvasesApi.resolveSyncConflict(
+                  activeConflict.id,
+                  "accept-remote"
+                )
+              }}
+            >
+              Accept Remote
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!activeConflict) return
+                canvasesApi.resolveSyncConflict(
+                  activeConflict.id,
+                  "save-local-as-new"
+                )
+              }}
+            >
+              Save Local As New
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!activeConflict) return
+                canvasesApi.resolveSyncConflict(
+                  activeConflict.id,
+                  "overwrite-remote"
+                )
+              }}
+            >
+              Overwrite Remote
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
