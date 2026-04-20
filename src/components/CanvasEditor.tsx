@@ -242,11 +242,6 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
           }}
         />
       </div>
-
-      {/* Auto-save Indicator */}
-      <div className="border-t bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
-        Auto-saved • {new Date(canvas.updatedAt).toLocaleTimeString()}
-      </div>
     </div>
   );
 }

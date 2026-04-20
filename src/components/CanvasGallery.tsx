@@ -197,19 +197,8 @@ export function CanvasGallery({
         <div className="flex items-center justify-between gap-6">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              {activeProject && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onBack || (() => onOpenProject("/"))}
-                  className="-ml-2 gap-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  <ArrowLeft className="size-4" />
-                  <span className="hidden sm:inline">Home</span>
-                </Button>
-              )}
               <h1 className="text-4xl font-semibold tracking-tight text-balance text-foreground">
-                {activeProject || "Better Excalidraw"}
+                Better Excalidraw
               </h1>
             </div>
             <p className="mt-1.5 text-sm text-muted-foreground">
