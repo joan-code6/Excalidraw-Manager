@@ -6,6 +6,7 @@ const endpoint = import.meta.env.VITE_APPWRITE_ENDPOINT;
 const projectId = import.meta.env.VITE_APPWRITE_PROJECT_ID;
 const databaseId = import.meta.env.VITE_APPWRITE_DATABASE_ID;
 const canvasesCollectionId = import.meta.env.VITE_APPWRITE_CANVASES_COLLECTION_ID;
+const sharesCollectionId = import.meta.env.VITE_APPWRITE_SHARES_COLLECTION_ID;
 
 export const APPWRITE_ENABLED =
   typeof endpoint === 'string' && endpoint.trim().length > 0 &&
@@ -26,5 +27,6 @@ const databases = new Databases(client);
 
 export const APPWRITE_DATABASE_ID = databaseId as string | undefined;
 export const APPWRITE_CANVASES_COLLECTION_ID = canvasesCollectionId as string | undefined;
+export const APPWRITE_SHARES_COLLECTION_ID = sharesCollectionId as string | undefined;
 
 export { client, account, databases };

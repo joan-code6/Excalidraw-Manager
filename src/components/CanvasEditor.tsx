@@ -3,8 +3,10 @@ import { Excalidraw, exportToCanvas } from '@excalidraw/excalidraw';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ExcalidrawCanvas } from '@/types/canvas';
-import { ChevronLeft, Save, Moon, Sun } from 'lucide-react';
+import { ChevronLeft, Save, Moon, Sun, Share2 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
+import { ShareDialog } from '@/components/ShareDialog';
+import { createCanvasShare, findCanvasShares, getShareUrl, updateAllCanvasShares } from '@/lib/canvasShare';
 import '@excalidraw/excalidraw/index.css';
 
 interface CanvasEditorProps {
@@ -20,6 +22,22 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(canvas.name);
   const { theme, setTheme } = useTheme();
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareLinks, setShareLinks] = useState<string[]>([]);
+  const [isLoadingShares, setIsLoadingShares] = useState(false);
+  const [isCreatingShare, setIsCreatingShare] = useState(false);
+
+  const normalizeAppStateForExcalidraw = (appState: any) => {
+    const normalized = appState && typeof appState === 'object' ? { ...appState } : {};
+    // Excalidraw expects collaborators to be a Map-like object with forEach.
+    normalized.collaborators = new Map();
+    return normalized;
+  };
+
+  const toSerializableAppState = (appState: any) => {
+    const { collaborators: _collaborators, ...rest } = appState || {};
+    return rest;
+  };
 
   useEffect(() => {
     setNewName(canvas.name);
@@ -60,12 +78,16 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
         
         const data = JSON.stringify({
           elements,
-          appState,
+          appState: toSerializableAppState(appState),
           files,
           thumbnail,
         });
         
         onSave(data);
+        
+        // Update all shares with new data
+        await updateAllCanvasShares(canvas.id, data);
+        
         // Visual feedback
         setTimeout(() => setIsSaving(false), 500);
       } catch (error) {
@@ -99,6 +121,51 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
     setIsRenaming(false);
   };
 
+  const handleShare = async () => {
+    if (!canvas.id) return;
+
+    try {
+      setIsLoadingShares(true);
+      const existingShares = await findCanvasShares(canvas.id);
+      const links = existingShares
+        .map((share) => getShareUrl(share.id))
+        .sort((a, b) => a.localeCompare(b));
+      setShareLinks(links);
+      setShareDialogOpen(true);
+    } catch (error) {
+      console.error('Failed to load shares:', error);
+    } finally {
+      setIsLoadingShares(false);
+    }
+  };
+
+  const handleCreateNewShare = async () => {
+    if (!excalidrawAPI.current) return;
+
+    try {
+      setIsCreatingShare(true);
+      const elements = excalidrawAPI.current.getSceneElements();
+      const appState = excalidrawAPI.current.getAppState();
+      const files = excalidrawAPI.current.getFiles?.() ?? {};
+
+      const shareData = JSON.stringify({
+        elements,
+        appState: toSerializableAppState(appState),
+        files,
+      });
+
+      const share = await createCanvasShare(canvas.id, shareData);
+      if (!share) return;
+
+      const newLink = getShareUrl(share.id);
+      setShareLinks((prev) => [newLink, ...prev.filter((link) => link !== newLink)]);
+    } catch (error) {
+      console.error('Failed to create share:', error);
+    } finally {
+      setIsCreatingShare(false);
+    }
+  };
+
   // Auto-save every 5 seconds and when window closes
   useEffect(() => {
     const autoSaveInterval = setInterval(() => {
@@ -129,11 +196,7 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
       };
     } else if (parsed && parsed.elements !== undefined) {
       // New format: object with elements and appState
-      const appState = parsed.appState || {};
-      // Ensure collaborators is an array
-      if (appState.collaborators && !Array.isArray(appState.collaborators)) {
-        appState.collaborators = [];
-      }
+      const appState = normalizeAppStateForExcalidraw(parsed.appState);
       initialData = {
         elements: parsed.elements,
         appState: appState,
@@ -217,6 +280,18 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
           </Button>
 
           <Button
+            onClick={handleShare}
+            disabled={isCreatingShare}
+            variant="outline"
+            className="gap-2"
+            size="sm"
+            title="Generate a shareable link for others to view"
+          >
+            <Share2 className="size-4" />
+            Share
+          </Button>
+
+          <Button
             onClick={handleSave}
             disabled={isSaving}
             className="gap-2"
@@ -242,6 +317,16 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
           }}
         />
       </div>
+
+      <ShareDialog
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        canvasName={canvas.name}
+        shareLinks={shareLinks}
+        isLoadingShares={isLoadingShares}
+        onCreateNewShare={handleCreateNewShare}
+        isCreating={isCreatingShare}
+      />
     </div>
   );
 }

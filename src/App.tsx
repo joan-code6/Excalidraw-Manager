@@ -9,6 +9,7 @@ import {
 import { useCanvases } from "@/hooks/useCanvases"
 import { CanvasGallery } from "@/components/CanvasGallery"
 import { CanvasEditor } from "@/components/CanvasEditor"
+import { CanvasViewer } from "@/components/CanvasViewer"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { ExcalidrawCanvas } from "@/types/canvas"
+import { getCanvasShare } from "@/lib/canvasShare"
 
 type CanvasesApi = ReturnType<typeof useCanvases>
 
@@ -77,6 +79,82 @@ function GalleryPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
       onDeleteCanvas={(canvasId) => {
         deleteCanvas(canvasId)
       }}
+      onBack={() => navigate("/")}
+    />
+  )
+}
+
+function SharePage() {
+  const navigate = useNavigate()
+  const { shareId } = useParams()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [sharedCanvas, setSharedCanvas] = useState<ExcalidrawCanvas | null>(null)
+
+  useEffect(() => {
+    const loadSharedCanvas = async () => {
+      if (!shareId) {
+        setError("Invalid share link")
+        setLoading(false)
+        return
+      }
+
+      try {
+        const share = await getCanvasShare(shareId)
+        if (!share) {
+          setError("Share not found")
+          return
+        }
+
+        // Create a canvas object from the share data
+        setSharedCanvas({
+          id: share.canvasId,
+          name: `Shared Canvas`,
+          description: "Shared view",
+          project: "Shared",
+          data: share.data,
+          createdAt: new Date(share.createdAt).getTime(),
+          updatedAt: new Date(share.updatedAt).getTime(),
+        })
+      } catch (err) {
+        console.error("Failed to load shared canvas:", err)
+        setError("Failed to load shared canvas")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadSharedCanvas()
+  }, [shareId])
+
+  if (loading) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="mb-4 size-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-muted-foreground">Loading shared canvas...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !sharedCanvas) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-background">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-4">{error || "Canvas not found"}</p>
+          <Button onClick={() => navigate("/")} variant="outline">
+            Back to Home
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <CanvasViewer
+      canvas={sharedCanvas}
+      shareId={shareId}
       onBack={() => navigate("/")}
     />
   )
@@ -177,10 +255,11 @@ export function App() {
           path="/canvas/:canvasId"
           element={<EditorPage canvasesApi={canvasesApi} />}
         />
+        <Route path="/share/:shareId" element={<SharePage />} />
       </Routes>
 
       <Dialog open={Boolean(activeConflict)}>
-        <DialogContent showCloseButton={false}>
+        <DialogContent showCloseButton={false} className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Sync conflict detected</DialogTitle>
             <DialogDescription>
@@ -203,9 +282,10 @@ export function App() {
             </div>
           )}
 
-          <DialogFooter className="gap-2 sm:justify-between">
+          <DialogFooter className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Button
               variant="outline"
+              className="w-full"
               onClick={() => {
                 if (!activeConflict) return
                 canvasesApi.resolveSyncConflict(
@@ -218,6 +298,7 @@ export function App() {
             </Button>
             <Button
               variant="secondary"
+              className="w-full"
               onClick={() => {
                 if (!activeConflict) return
                 canvasesApi.resolveSyncConflict(
@@ -230,6 +311,7 @@ export function App() {
             </Button>
             <Button
               variant="destructive"
+              className="w-full"
               onClick={() => {
                 if (!activeConflict) return
                 canvasesApi.resolveSyncConflict(

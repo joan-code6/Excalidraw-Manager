@@ -661,8 +661,8 @@ export function useCanvases() {
               remoteCanvas === null
                 ? previousUpdatedAt !== undefined && mightExistRemotely
                 : previousUpdatedAt === undefined
-                  ? true
-                  : remoteUpdatedAt !== previousUpdatedAt
+                  ? false
+                  : remoteUpdatedAt > previousUpdatedAt
 
             if (remoteChangedSinceBaseline) {
               if (forceOverwriteCanvasIdsRef.current.has(canvas.id)) {
