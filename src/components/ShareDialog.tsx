@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,7 @@ interface ShareDialogProps {
   onCreateViewShare: () => void;
   onCreateEditShare: () => void;
   onInviteByEmail: (email: string) => void;
+  onDeleteShare?: (linkId: string) => void;
   isCreating?: boolean;
 }
 
@@ -38,6 +39,7 @@ export function ShareDialog({
   onCreateViewShare,
   onCreateEditShare,
   onInviteByEmail,
+  onDeleteShare,
   isCreating = false,
 }: ShareDialogProps) {
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
@@ -104,6 +106,15 @@ export function ShareDialog({
                       ) : (
                         <Copy className="h-4 w-4" />
                       )}
+                    </Button>
+                    <Button
+                      onClick={() => onDeleteShare?.(linkItem.id)}
+                      variant="outline"
+                      size="icon"
+                      disabled={isCreating || isLoadingShares}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                   </div>

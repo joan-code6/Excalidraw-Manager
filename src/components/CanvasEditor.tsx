@@ -6,7 +6,7 @@ import type { ExcalidrawCanvas } from '@/types/canvas';
 import { ChevronLeft, Save, Moon, Sun, Share2 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
 import { ShareDialog, type ShareLinkItem } from '@/components/ShareDialog';
-import { createCanvasShare, findCanvasShares, getShareUrl, updateAllCanvasShares, updateEditableCanvasShares } from '@/lib/canvasShare';
+import { createCanvasShare, deleteCanvasShare, findCanvasShares, getShareUrl, updateAllCanvasShares, updateEditableCanvasShares } from '@/lib/canvasShare';
 import { mergeSceneSnapshots, parseSceneSnapshot, serializeSceneSnapshot } from '@/lib/canvasRealtimeMerge';
 import { client } from '@/lib/appwrite';
 import '@excalidraw/excalidraw/index.css';
@@ -198,6 +198,22 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
       setShareLinks((prev) => [newLink, ...prev.filter((link) => link.id !== newLink.id)]);
     } catch (error) {
       console.error('Failed to create share:', error);
+    } finally {
+      setIsCreatingShare(false);
+    }
+  };
+
+  const handleDeleteShare = async (shareId: string) => {
+    try {
+      setIsCreatingShare(true);
+      const deleted = await deleteCanvasShare(shareId);
+      if (!deleted) {
+        return;
+      }
+
+      setShareLinks((prev) => prev.filter((link) => link.id !== shareId));
+    } catch (error) {
+      console.error('Failed to delete share:', error);
     } finally {
       setIsCreatingShare(false);
     }
@@ -480,6 +496,7 @@ export function CanvasEditor({ canvas, onSave, onRename, onBack }: CanvasEditorP
         onCreateViewShare={() => handleCreateShare('view')}
         onCreateEditShare={() => handleCreateShare('edit')}
         onInviteByEmail={(email) => handleCreateShare('edit', email)}
+        onDeleteShare={handleDeleteShare}
         isCreating={isCreatingShare}
       />
     </div>
