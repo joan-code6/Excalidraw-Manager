@@ -51,7 +51,7 @@ function persistTrimmedCanvasesToStorage(canvases: ExcalidrawCanvas[]) {
   let best = 0
 
   while (low <= high) {
-    const mid = Math.floor((low + high) / 2)
+    const mid = Math.floor(low + (high - low) / 2)
     const candidate = sorted.slice(0, mid)
     const result = setStorageItemSafely(STORAGE_KEY, JSON.stringify(candidate))
     if (result === "ok") {
@@ -75,6 +75,7 @@ function persistTrimmedCanvasesToStorage(canvases: ExcalidrawCanvas[]) {
     return sorted.slice(0, best)
   }
 
+  // Try to keep the storage key valid JSON even when no non-empty payload fits.
   const emptySaveResult = setStorageItemSafely(STORAGE_KEY, JSON.stringify([]))
   if (emptySaveResult === "ok") {
     console.warn(
