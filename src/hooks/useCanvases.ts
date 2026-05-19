@@ -19,6 +19,27 @@ const CLOUD_BASELINE_STORAGE_PREFIX = "excalidraw-cloud-baseline"
 const APPWRITE_ID_MAX_LENGTH = 36
 const APPWRITE_ID_PATTERN = /^[A-Za-z0-9._-]+$/
 
+function isQuotaExceededError(error: unknown) {
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")
+  )
+}
+
+function setStorageItemSafely(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+    return true
+  } catch (error) {
+    if (isQuotaExceededError(error)) {
+      console.warn(`Storage quota exceeded while saving "${key}".`)
+      return false
+    }
+    console.error(`Failed to save "${key}" to localStorage:`, error)
+    return false
+  }
+}
+
 function createShortCanvasId() {
   const timePart = Date.now().toString(36)
   const randomPart = Math.random().toString(36).slice(2, 10)
@@ -185,18 +206,14 @@ function saveCloudBaseline(
   ids: string[],
   updatedAtMap: Map<string, number>
 ) {
-  try {
-    const updatedAt = Object.fromEntries(updatedAtMap.entries())
-    localStorage.setItem(
-      getCloudBaselineStorageKey(userId),
-      JSON.stringify({
-        ids,
-        updatedAt,
-      })
-    )
-  } catch (error) {
-    console.error("Failed to save cloud baseline cache:", error)
-  }
+  const updatedAt = Object.fromEntries(updatedAtMap.entries())
+  setStorageItemSafely(
+    getCloudBaselineStorageKey(userId),
+    JSON.stringify({
+      ids,
+      updatedAt,
+    })
+  )
 }
 
 export function useCanvases() {
@@ -249,7 +266,7 @@ export function useCanvases() {
           normalizedCanvases
         )
         setProjects(mergedProjects)
-        localStorage.setItem(
+        setStorageItemSafely(
           PROJECTS_STORAGE_KEY,
           JSON.stringify(mergedProjects)
         )
@@ -276,11 +293,11 @@ export function useCanvases() {
               ? updatedCanvases(currentCanvases)
               : updatedCanvases
           const normalized = normalizeCanvases(nextCanvases)
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
+          setStorageItemSafely(STORAGE_KEY, JSON.stringify(normalized))
 
           setProjects((prev) => {
             const next = mergeProjectsWithDerived(prev, normalized)
-            localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+            setStorageItemSafely(PROJECTS_STORAGE_KEY, JSON.stringify(next))
             return next
           })
 
@@ -773,7 +790,7 @@ export function useCanvases() {
         return prev
       }
       const updated = [...prev, trimmed]
-      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(updated))
+      setStorageItemSafely(PROJECTS_STORAGE_KEY, JSON.stringify(updated))
       return updated
     })
   }, [])
@@ -798,7 +815,7 @@ export function useCanvases() {
           return prev
         }
         const next = [...prev, targetProject]
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+        setStorageItemSafely(PROJECTS_STORAGE_KEY, JSON.stringify(next))
         return next
       })
     },
@@ -825,7 +842,7 @@ export function useCanvases() {
 
       setProjects((prev) => {
         const next = prev.filter((project) => project !== name)
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+        setStorageItemSafely(PROJECTS_STORAGE_KEY, JSON.stringify(next))
         return next
       })
     },
