@@ -22,6 +22,7 @@ const APPWRITE_ID_PATTERN = /^[A-Za-z0-9._-]+$/
 function isQuotaExceededError(error: unknown) {
   return (
     error instanceof DOMException &&
+    // Firefox can report quota failures with this legacy error name.
     (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_EXCEEDED")
   )
 }
@@ -44,22 +45,34 @@ function setStorageItemSafely(key: string, value: string): StorageWriteResult {
 
 function persistTrimmedCanvasesToStorage(canvases: ExcalidrawCanvas[]) {
   const sorted = [...canvases].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-  let candidate = sorted
 
-  while (candidate.length > 0) {
+  let low = 0
+  let high = sorted.length
+  let best = 0
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const candidate = sorted.slice(0, mid)
     const result = setStorageItemSafely(STORAGE_KEY, JSON.stringify(candidate))
     if (result === "ok") {
-      if (candidate.length !== canvases.length) {
-        console.warn(
-          `Storage quota mitigation applied: kept ${candidate.length}/${canvases.length} most recently updated canvases in local cache.`
-        )
-      }
-      return candidate
+      best = mid
+      low = mid + 1
+      continue
     }
     if (result === "error") {
+      console.warn("Local canvas cache write failed due to a non-quota storage error.")
       return canvases
     }
-    candidate = candidate.slice(0, -1)
+    high = mid - 1
+  }
+
+  if (best > 0) {
+    if (best !== canvases.length) {
+      console.warn(
+        `Storage quota mitigation applied: kept ${best}/${canvases.length} most recently updated canvases in local cache.`
+      )
+    }
+    return sorted.slice(0, best)
   }
 
   const emptySaveResult = setStorageItemSafely(STORAGE_KEY, JSON.stringify([]))
@@ -336,7 +349,13 @@ export function useCanvases() {
 
           setProjects((prev) => {
             const next = mergeProjectsWithDerived(prev, persistedCanvases)
-            setStorageItemSafely(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+            const projectsWriteResult = setStorageItemSafely(
+              PROJECTS_STORAGE_KEY,
+              JSON.stringify(next)
+            )
+            if (projectsWriteResult !== "ok") {
+              console.warn("Project list could not be fully persisted to local storage.")
+            }
             return next
           })
 
