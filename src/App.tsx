@@ -260,7 +260,7 @@ export function App() {
   const [quotaOpen, setQuotaOpen] = useState(false)
 
   useEffect(() => {
-    const onQuota = (ev: Event) => {
+    const onQuota = () => {
       setQuotaOpen(true)
     }
     window.addEventListener('storageQuotaExceeded', onQuota as EventListener)

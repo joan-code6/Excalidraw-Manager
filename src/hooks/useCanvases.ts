@@ -429,7 +429,7 @@ export function useCanvases() {
   )
 
   useEffect(() => {
-    const onQuota = async (ev: Event) => {
+    const onQuota = async () => {
       // Try local IndexedDB migration first
       try {
         const migrated = await migrateOldestToIndexedDB(0.8)
@@ -1089,6 +1089,7 @@ export function useCanvases() {
     deleteCanvas,
     projects,
     getCanvas,
+    restoreCanvas,
     getCanvasList,
     syncConflicts,
     resolveSyncConflict,
