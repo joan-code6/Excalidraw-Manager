@@ -22,22 +22,55 @@ const APPWRITE_ID_PATTERN = /^[A-Za-z0-9._-]+$/
 function isQuotaExceededError(error: unknown) {
   return (
     error instanceof DOMException &&
-    (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")
+    (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_EXCEEDED")
   )
 }
 
-function setStorageItemSafely(key: string, value: string) {
+type StorageWriteResult = "ok" | "quota-exceeded" | "error"
+
+function setStorageItemSafely(key: string, value: string): StorageWriteResult {
   try {
     localStorage.setItem(key, value)
-    return true
+    return "ok"
   } catch (error) {
     if (isQuotaExceededError(error)) {
       console.warn(`Storage quota exceeded while saving "${key}".`)
-      return false
+      return "quota-exceeded"
     }
     console.error(`Failed to save "${key}" to localStorage:`, error)
-    return false
+    return "error"
   }
+}
+
+function trimCanvasesForStorage(canvases: ExcalidrawCanvas[]) {
+  const sorted = [...canvases].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  let candidate = sorted
+
+  while (candidate.length > 0) {
+    const result = setStorageItemSafely(STORAGE_KEY, JSON.stringify(candidate))
+    if (result === "ok") {
+      if (candidate.length !== canvases.length) {
+        console.warn(
+          `Storage quota mitigation applied: kept ${candidate.length}/${canvases.length} most recently updated canvases in local cache.`
+        )
+      }
+      return candidate
+    }
+    if (result === "error") {
+      return canvases
+    }
+    candidate = candidate.slice(0, -1)
+  }
+
+  const emptySaveResult = setStorageItemSafely(STORAGE_KEY, JSON.stringify([]))
+  if (emptySaveResult === "ok") {
+    console.warn(
+      "Storage quota mitigation applied: local cache for canvases was cleared because quota was fully exhausted."
+    )
+    return []
+  }
+
+  return canvases
 }
 
 function createShortCanvasId() {
@@ -293,15 +326,15 @@ export function useCanvases() {
               ? updatedCanvases(currentCanvases)
               : updatedCanvases
           const normalized = normalizeCanvases(nextCanvases)
-          setStorageItemSafely(STORAGE_KEY, JSON.stringify(normalized))
+          const persistedCanvases = trimCanvasesForStorage(normalized)
 
           setProjects((prev) => {
-            const next = mergeProjectsWithDerived(prev, normalized)
+            const next = mergeProjectsWithDerived(prev, persistedCanvases)
             setStorageItemSafely(PROJECTS_STORAGE_KEY, JSON.stringify(next))
             return next
           })
 
-          return normalized
+          return persistedCanvases
         })
       } catch (error) {
         console.error("Failed to save canvases:", error)
