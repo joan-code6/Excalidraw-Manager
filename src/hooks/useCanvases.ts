@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import type { ExcalidrawCanvas, CanvasListItem } from "@/types/canvas"
 import { useAuth } from "@/hooks/useAuth"
 import { APPWRITE_DB_ENABLED } from "@/lib/appwrite"
+import { safeSetItem } from "@/lib/storage"
 import {
   type CanvasUpsertMode,
   CanvasSyncError,
@@ -10,6 +11,7 @@ import {
   listUserCanvases,
   upsertCanvas,
 } from "@/lib/canvasSyncDb"
+import { idbSet, idbGet, idbDel } from '@/lib/indexeddb'
 
 const STORAGE_KEY = "excalidraw-canvases"
 const PROJECTS_STORAGE_KEY = "excalidraw-projects"
@@ -249,10 +251,7 @@ export function useCanvases() {
           normalizedCanvases
         )
         setProjects(mergedProjects)
-        localStorage.setItem(
-          PROJECTS_STORAGE_KEY,
-          JSON.stringify(mergedProjects)
-        )
+        safeSetItem(PROJECTS_STORAGE_KEY, JSON.stringify(mergedProjects))
       } catch (error) {
         console.error("Failed to load canvases:", error)
       } finally {
@@ -276,11 +275,11 @@ export function useCanvases() {
               ? updatedCanvases(currentCanvases)
               : updatedCanvases
           const normalized = normalizeCanvases(nextCanvases)
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
+          safeSetItem(STORAGE_KEY, JSON.stringify(normalized))
 
           setProjects((prev) => {
             const next = mergeProjectsWithDerived(prev, normalized)
-            localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+            safeSetItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
             return next
           })
 
@@ -376,6 +375,140 @@ export function useCanvases() {
     () => Boolean(APPWRITE_DB_ENABLED && user?.$id),
     [user]
   )
+
+  // Migration / eviction: move heavy canvas payloads (`data`) to IndexedDB
+  const migrateOldestToIndexedDB = useCallback(
+    async (targetFraction = 0.8) => {
+      if (!(navigator as any).storage || typeof (navigator as any).storage.estimate !== 'function') {
+        return false
+      }
+
+      try {
+        let estimate = await (navigator as any).storage.estimate()
+        const quota = estimate.quota || 0
+        let usage = estimate.usage || 0
+        let fraction = quota > 0 ? usage / quota : 0
+
+        if (fraction < targetFraction) {
+          return true
+        }
+
+        // Sort canvases by oldest updatedAt (or createdAt)
+        const sorted = [...canvases].sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
+
+        for (const canvas of sorted) {
+          if (fraction < targetFraction) break
+          if (!canvas || !canvas.data) continue
+          // skip already cached/evicted
+          if ((canvas as any).localStatus === 'cached' || (canvas as any).localStatus === 'evicted') continue
+
+          const key = `canvas:${canvas.id}:data`
+          const ok = await idbSet(key, canvas.data)
+          if (!ok) continue
+
+          // Clear heavy payload locally and mark as cached
+          saveCanvases((current) =>
+            current.map((c) =>
+              c.id === canvas.id ? { ...c, data: '', localStatus: 'cached', updatedAt: Date.now() } : c
+            )
+          )
+
+          // Recompute storage estimate
+          estimate = await (navigator as any).storage.estimate()
+          usage = estimate.usage || 0
+          fraction = quota > 0 ? usage / quota : 0
+        }
+
+        return fraction < targetFraction
+      } catch (err) {
+        console.error('Migration to IndexedDB failed', err)
+        return false
+      }
+    },
+    [canvases, saveCanvases]
+  )
+
+  useEffect(() => {
+    const onQuota = async (ev: Event) => {
+      // Try local IndexedDB migration first
+      try {
+        const migrated = await migrateOldestToIndexedDB(0.8)
+        if (!migrated && canSyncWithDb && user?.$id) {
+          // try cloud eviction as fallback
+          try {
+            // upload oldest canvases to cloud then remove local payloads until under threshold
+            let estimate = await (navigator as any).storage.estimate()
+            const quota = estimate.quota || 0
+            let usage = estimate.usage || 0
+            let fraction = quota > 0 ? usage / quota : 0
+
+            const sorted = [...canvases].sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
+            for (const canvas of sorted) {
+              if (fraction < 0.8) break
+              if (!canvas) continue
+              if ((canvas as any).localStatus === 'evicted') continue
+
+              // ensure we have full payload (from idb if needed)
+              let payloadData = canvas.data
+              if (!payloadData) {
+                const idbKey = `canvas:${canvas.id}:data`
+                const idbVal = await idbGet<string>(idbKey)
+                payloadData = idbVal || ''
+              }
+
+              try {
+                await upsertCanvas(user.$id, { ...canvas, data: payloadData }, 'prefer-update')
+                // mark evicted locally
+                saveCanvases((current) =>
+                  current.map((c) =>
+                    c.id === canvas.id ? { ...c, data: '', localStatus: 'evicted', updatedAt: Date.now() } : c
+                  )
+                )
+
+                // delete idb copy if present
+                const idbKey = `canvas:${canvas.id}:data`
+                await idbDel(idbKey)
+
+                estimate = await (navigator as any).storage.estimate()
+                usage = estimate.usage || 0
+                fraction = quota > 0 ? usage / quota : 0
+              } catch (err) {
+                console.error('Failed to upload canvas during eviction', err)
+                // continue to next
+              }
+            }
+          } catch (err) {
+            console.error('Cloud eviction failed', err)
+          }
+        }
+      } catch (err) {
+        console.error('Error during quota event migration', err)
+      }
+    }
+
+    window.addEventListener('storageQuotaExceeded', onQuota as EventListener)
+
+    // proactive check on mount
+    ;(async () => {
+      if ((navigator as any).storage && typeof (navigator as any).storage.estimate === 'function') {
+        try {
+          const estimate = await (navigator as any).storage.estimate()
+          const quota = estimate.quota || 0
+          const usage = estimate.usage || 0
+          const fraction = quota > 0 ? usage / quota : 0
+          if (fraction >= 0.8) {
+            await migrateOldestToIndexedDB(0.8)
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+    })()
+
+    return () => {
+      window.removeEventListener('storageQuotaExceeded', onQuota as EventListener)
+    }
+  }, [migrateOldestToIndexedDB])
 
   useEffect(() => {
     if (!canSyncWithDb) {
@@ -768,12 +901,12 @@ export function useCanvases() {
     if (!trimmed) {
       return
     }
-    setProjects((prev) => {
+      setProjects((prev) => {
       if (prev.includes(trimmed)) {
         return prev
       }
       const updated = [...prev, trimmed]
-      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(updated))
+        safeSetItem(PROJECTS_STORAGE_KEY, JSON.stringify(updated))
       return updated
     })
   }, [])
@@ -798,7 +931,7 @@ export function useCanvases() {
           return prev
         }
         const next = [...prev, targetProject]
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+        safeSetItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
         return next
       })
     },
@@ -825,7 +958,7 @@ export function useCanvases() {
 
       setProjects((prev) => {
         const next = prev.filter((project) => project !== name)
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+        safeSetItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
         return next
       })
     },
@@ -889,6 +1022,45 @@ export function useCanvases() {
       return canvases.find((canvas) => canvas.id === id)
     },
     [canvases]
+  )
+
+  const restoreCanvas = useCallback(
+    async (id: string) => {
+      const canvas = canvases.find((c) => c.id === id)
+      if (!canvas) throw new Error('Canvas not found')
+
+      // If cached in IDB
+      if ((canvas as any).localStatus === 'cached') {
+        const idbKey = `canvas:${id}:data`
+        const data = await idbGet<string>(idbKey)
+        if (data) {
+          updateCanvas(id, { data })
+          // optionally delete idb copy after restore
+          await idbDel(idbKey)
+          return
+        }
+      }
+
+      // If evicted to cloud
+      if ((canvas as any).localStatus === 'evicted') {
+        if (!canSyncWithDb || !user?.$id) {
+          throw new Error('Canvas is stored in cloud; please sign in to restore')
+        }
+        try {
+          const remote = await getCanvasById(id)
+          if (!remote) throw new Error('Remote canvas not found')
+          // remote contains data; restore locally
+          updateCanvas(id, { data: remote.data })
+          return
+        } catch (err) {
+          throw err
+        }
+      }
+
+      // Nothing to restore
+      return
+    },
+    [canvases, canSyncWithDb, user?.$id, updateCanvas]
   )
 
   const getCanvasList = useCallback(() => {

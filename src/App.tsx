@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import type { ExcalidrawCanvas } from "@/types/canvas"
 import { getCanvasShare } from "@/lib/canvasShare"
+import QuotaModal from "@/components/QuotaModal"
 
 type CanvasesApi = ReturnType<typeof useCanvases>
 
@@ -38,6 +39,7 @@ function GalleryPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
     projects,
     deleteCanvas,
     getCanvasList,
+    restoreCanvas,
   } = canvasesApi
 
   if (loading) {
@@ -73,7 +75,16 @@ function GalleryPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
           project === "/" ? "/" : `/project/${encodeURIComponent(project)}`
         )
       }}
-      onOpenCanvas={(canvasId) => {
+      onOpenCanvas={async (canvasId) => {
+        try {
+          // show a small non-blocking message in console and restore before navigation
+          console.log('Restoring canvas if needed...')
+          await restoreCanvas(canvasId)
+        } catch (err) {
+          // If restore failed, show an alert prompting sign-in
+          window.alert((err as Error).message || 'Failed to restore canvas. Please sign in and try again.')
+          return
+        }
         navigate(`/canvas/${canvasId}`)
       }}
       onDeleteCanvas={(canvasId) => {
@@ -246,6 +257,15 @@ function EditorPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
 export function App() {
   const canvasesApi = useCanvases()
   const activeConflict = canvasesApi.syncConflicts[0]
+  const [quotaOpen, setQuotaOpen] = useState(false)
+
+  useEffect(() => {
+    const onQuota = (ev: Event) => {
+      setQuotaOpen(true)
+    }
+    window.addEventListener('storageQuotaExceeded', onQuota as EventListener)
+    return () => window.removeEventListener('storageQuotaExceeded', onQuota as EventListener)
+  }, [])
 
   return (
     <>
@@ -329,6 +349,8 @@ export function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <QuotaModal open={quotaOpen} onClose={() => setQuotaOpen(false)} />
     </>
   )
 }
