@@ -42,7 +42,7 @@ function setStorageItemSafely(key: string, value: string): StorageWriteResult {
   }
 }
 
-function trimCanvasesForStorage(canvases: ExcalidrawCanvas[]) {
+function persistTrimmedCanvasesToStorage(canvases: ExcalidrawCanvas[]) {
   const sorted = [...canvases].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
   let candidate = sorted
 
@@ -240,13 +240,16 @@ function saveCloudBaseline(
   updatedAtMap: Map<string, number>
 ) {
   const updatedAt = Object.fromEntries(updatedAtMap.entries())
-  setStorageItemSafely(
+  const writeResult = setStorageItemSafely(
     getCloudBaselineStorageKey(userId),
     JSON.stringify({
       ids,
       updatedAt,
     })
   )
+  if (writeResult !== "ok") {
+    console.warn("Cloud baseline cache was not fully persisted to local storage.")
+  }
 }
 
 export function useCanvases() {
@@ -299,10 +302,13 @@ export function useCanvases() {
           normalizedCanvases
         )
         setProjects(mergedProjects)
-        setStorageItemSafely(
+        const projectsWriteResult = setStorageItemSafely(
           PROJECTS_STORAGE_KEY,
           JSON.stringify(mergedProjects)
         )
+        if (projectsWriteResult !== "ok") {
+          console.warn("Project list could not be fully persisted to local storage.")
+        }
       } catch (error) {
         console.error("Failed to load canvases:", error)
       } finally {
@@ -326,7 +332,7 @@ export function useCanvases() {
               ? updatedCanvases(currentCanvases)
               : updatedCanvases
           const normalized = normalizeCanvases(nextCanvases)
-          const persistedCanvases = trimCanvasesForStorage(normalized)
+          const persistedCanvases = persistTrimmedCanvasesToStorage(normalized)
 
           setProjects((prev) => {
             const next = mergeProjectsWithDerived(prev, persistedCanvases)
