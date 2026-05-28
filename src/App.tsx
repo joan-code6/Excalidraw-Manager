@@ -258,14 +258,18 @@ export function App() {
   const canvasesApi = useCanvases()
   const activeConflict = canvasesApi.syncConflicts[0]
   const [quotaOpen, setQuotaOpen] = useState(false)
+  const [quotaDismissed, setQuotaDismissed] = useState(false)
 
   useEffect(() => {
     const onQuota = () => {
+      if (quotaDismissed) {
+        return
+      }
       setQuotaOpen(true)
     }
     window.addEventListener('storageQuotaExceeded', onQuota as EventListener)
     return () => window.removeEventListener('storageQuotaExceeded', onQuota as EventListener)
-  }, [])
+  }, [quotaDismissed])
 
   return (
     <>
@@ -350,7 +354,13 @@ export function App() {
         </DialogContent>
       </Dialog>
 
-      <QuotaModal open={quotaOpen} onClose={() => setQuotaOpen(false)} />
+      <QuotaModal
+        open={quotaOpen}
+        onClose={() => {
+          setQuotaOpen(false)
+          setQuotaDismissed(true)
+        }}
+      />
     </>
   )
 }

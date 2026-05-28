@@ -13,7 +13,14 @@ export function QuotaModal({ open, onClose }: { open: boolean; onClose: () => vo
   const { user, signInWithGoogle } = useAuth()
 
   return (
-    <Dialog open={open}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose()
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Storage limit reached</DialogTitle>
