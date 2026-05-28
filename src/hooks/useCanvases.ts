@@ -219,6 +219,7 @@ export function useCanvases() {
   const conflictByCanvasIdRef = useRef<Map<string, string>>(new Map())
   const conflictContextRef = useRef<Map<string, PendingConflictContext>>(new Map())
   const forceOverwriteCanvasIdsRef = useRef<Set<string>>(new Set())
+  const quotaHandlingRef = useRef(false)
 
   const blockCloudSync = useCallback((reason: string) => {
     if (syncBlockedReasonRef.current) {
@@ -430,6 +431,10 @@ export function useCanvases() {
 
   useEffect(() => {
     const onQuota = async () => {
+      if (quotaHandlingRef.current) {
+        return
+      }
+      quotaHandlingRef.current = true
       // Try local IndexedDB migration first
       try {
         const migrated = await migrateOldestToIndexedDB(0.8)
@@ -483,6 +488,8 @@ export function useCanvases() {
         }
       } catch (err) {
         console.error('Error during quota event migration', err)
+      } finally {
+        quotaHandlingRef.current = false
       }
     }
 

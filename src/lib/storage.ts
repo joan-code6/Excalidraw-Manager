@@ -4,6 +4,9 @@ export interface SafeSetResult {
   error?: unknown
 }
 
+const QUOTA_EVENT_COOLDOWN_MS = 15000
+let lastQuotaEventAt = 0
+
 export function estimateSizeInBytes(value: string): number {
   try {
     return new Blob([value]).size
@@ -22,12 +25,18 @@ export function safeSetItem(key: string, value: string): SafeSetResult {
     const isQuota =
       err instanceof DOMException && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED')
 
-    try {
-      // notify app-wide listeners
-      const detail = { key, size: estimateSizeInBytes(value), error: err }
-      window.dispatchEvent(new CustomEvent('storageQuotaExceeded', { detail }))
-    } catch (e) {
-      // ignore
+    if (isQuota) {
+      try {
+        const now = Date.now()
+        if (now - lastQuotaEventAt >= QUOTA_EVENT_COOLDOWN_MS) {
+          lastQuotaEventAt = now
+          // notify app-wide listeners
+          const detail = { key, size: estimateSizeInBytes(value), error: err }
+          window.dispatchEvent(new CustomEvent('storageQuotaExceeded', { detail }))
+        }
+      } catch {
+        // ignore
+      }
     }
 
     return { success: false, quotaExceeded: isQuota, error: err }
