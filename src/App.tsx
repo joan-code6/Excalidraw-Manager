@@ -258,7 +258,13 @@ export function App() {
   const canvasesApi = useCanvases()
   const activeConflict = canvasesApi.syncConflicts[0]
   const [quotaOpen, setQuotaOpen] = useState(false)
-  const [quotaDismissed, setQuotaDismissed] = useState(false)
+  const [quotaDismissed, setQuotaDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem("quotaModalDismissed") === "1"
+    } catch {
+      return false
+    }
+  })
 
   useEffect(() => {
     const onQuota = () => {
@@ -359,6 +365,11 @@ export function App() {
         onClose={() => {
           setQuotaOpen(false)
           setQuotaDismissed(true)
+          try {
+            sessionStorage.setItem("quotaModalDismissed", "1")
+          } catch {
+            // ignore
+          }
         }}
       />
     </>
