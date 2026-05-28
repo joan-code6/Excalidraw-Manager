@@ -24,6 +24,8 @@ import { getCanvasShare } from "@/lib/canvasShare"
 import QuotaModal from "@/components/QuotaModal"
 
 type CanvasesApi = ReturnType<typeof useCanvases>
+const QUOTA_MODAL_DISMISSED_KEY = "quotaModalDismissed"
+const QUOTA_MODAL_DISMISSED_VALUE = "true"
 
 function GalleryPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
   const navigate = useNavigate()
@@ -258,14 +260,24 @@ export function App() {
   const canvasesApi = useCanvases()
   const activeConflict = canvasesApi.syncConflicts[0]
   const [quotaOpen, setQuotaOpen] = useState(false)
+  const [quotaDismissed, setQuotaDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem(QUOTA_MODAL_DISMISSED_KEY) === QUOTA_MODAL_DISMISSED_VALUE
+    } catch {
+      return false
+    }
+  })
 
   useEffect(() => {
     const onQuota = () => {
+      if (quotaDismissed) {
+        return
+      }
       setQuotaOpen(true)
     }
     window.addEventListener('storageQuotaExceeded', onQuota as EventListener)
     return () => window.removeEventListener('storageQuotaExceeded', onQuota as EventListener)
-  }, [])
+  }, [quotaDismissed])
 
   return (
     <>
@@ -350,7 +362,18 @@ export function App() {
         </DialogContent>
       </Dialog>
 
-      <QuotaModal open={quotaOpen} onClose={() => setQuotaOpen(false)} />
+      <QuotaModal
+        open={quotaOpen}
+        onClose={() => {
+          setQuotaOpen(false)
+          setQuotaDismissed(true)
+          try {
+            sessionStorage.setItem(QUOTA_MODAL_DISMISSED_KEY, QUOTA_MODAL_DISMISSED_VALUE)
+          } catch {
+            // ignore
+          }
+        }}
+      />
     </>
   )
 }
