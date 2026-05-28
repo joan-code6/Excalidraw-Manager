@@ -24,6 +24,8 @@ import { getCanvasShare } from "@/lib/canvasShare"
 import QuotaModal from "@/components/QuotaModal"
 
 type CanvasesApi = ReturnType<typeof useCanvases>
+const QUOTA_MODAL_DISMISSED_KEY = "quotaModalDismissed"
+const QUOTA_MODAL_DISMISSED_VALUE = "true"
 
 function GalleryPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
   const navigate = useNavigate()
@@ -260,7 +262,7 @@ export function App() {
   const [quotaOpen, setQuotaOpen] = useState(false)
   const [quotaDismissed, setQuotaDismissed] = useState(() => {
     try {
-      return sessionStorage.getItem("quotaModalDismissed") === "1"
+      return sessionStorage.getItem(QUOTA_MODAL_DISMISSED_KEY) === QUOTA_MODAL_DISMISSED_VALUE
     } catch {
       return false
     }
@@ -366,7 +368,7 @@ export function App() {
           setQuotaOpen(false)
           setQuotaDismissed(true)
           try {
-            sessionStorage.setItem("quotaModalDismissed", "1")
+            sessionStorage.setItem(QUOTA_MODAL_DISMISSED_KEY, QUOTA_MODAL_DISMISSED_VALUE)
           } catch {
             // ignore
           }

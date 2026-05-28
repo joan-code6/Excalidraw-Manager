@@ -5,7 +5,7 @@ export interface SafeSetResult {
 }
 
 const QUOTA_EVENT_COOLDOWN_MS = 15000
-let lastQuotaEventAt = 0
+const lastQuotaEventAtByKey = new Map<string, number>()
 
 export function estimateSizeInBytes(value: string): number {
   try {
@@ -28,8 +28,9 @@ export function safeSetItem(key: string, value: string): SafeSetResult {
     if (isQuota) {
       try {
         const now = Date.now()
-        if (now - lastQuotaEventAt >= QUOTA_EVENT_COOLDOWN_MS) {
-          lastQuotaEventAt = now
+        const lastForKey = lastQuotaEventAtByKey.get(key) || 0
+        if (now - lastForKey >= QUOTA_EVENT_COOLDOWN_MS) {
+          lastQuotaEventAtByKey.set(key, now)
           // notify app-wide listeners
           const detail = { key, size: estimateSizeInBytes(value), error: err }
           window.dispatchEvent(new CustomEvent('storageQuotaExceeded', { detail }))
