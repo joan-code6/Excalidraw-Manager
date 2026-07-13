@@ -410,7 +410,7 @@ export function useCanvases() {
           // Clear heavy payload locally and mark as cached
           saveCanvases((current) =>
             current.map((c) =>
-              c.id === canvas.id ? { ...c, data: '', localStatus: 'cached', updatedAt: Date.now() } : c
+              c.id === canvas.id ? { ...c, data: '', localStatus: 'cached' } : c
             )
           )
 
@@ -429,62 +429,86 @@ export function useCanvases() {
     [canvases, saveCanvases]
   )
 
+  const evictOldestToCloud = useCallback(
+    async (targetFraction = 0.8) => {
+      if (!canSyncWithDb || !user?.$id) {
+        return false
+      }
+
+      if (!(navigator as any).storage || typeof (navigator as any).storage.estimate !== 'function') {
+        return false
+      }
+
+      try {
+        let estimate = await (navigator as any).storage.estimate()
+        const quota = estimate.quota || 0
+        let usage = estimate.usage || 0
+        let fraction = quota > 0 ? usage / quota : 0
+
+        if (fraction < targetFraction) {
+          return true
+        }
+
+        const sorted = [...canvases].sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
+        for (const canvas of sorted) {
+          if (fraction < targetFraction) break
+          if (!canvas) continue
+          if ((canvas as any).localStatus === 'evicted') continue
+
+          let payloadData = canvas.data
+          if (!payloadData) {
+            const idbKey = `canvas:${canvas.id}:data`
+            const idbVal = await idbGet<string>(idbKey)
+            payloadData = idbVal || ''
+          }
+
+          if (!payloadData) {
+            continue
+          }
+
+          try {
+            await upsertCanvas(user.$id, { ...canvas, data: payloadData }, 'prefer-update')
+
+            saveCanvases((current) =>
+              current.map((c) =>
+                c.id === canvas.id ? { ...c, data: '', localStatus: 'evicted' } : c
+              )
+            )
+
+            const idbKey = `canvas:${canvas.id}:data`
+            await idbDel(idbKey)
+
+            estimate = await (navigator as any).storage.estimate()
+            usage = estimate.usage || 0
+            fraction = quota > 0 ? usage / quota : 0
+          } catch (err) {
+            console.error('Failed to upload canvas during eviction', err)
+          }
+        }
+
+        return fraction < targetFraction
+      } catch (err) {
+        console.error('Cloud eviction failed', err)
+        return false
+      }
+    },
+    [canSyncWithDb, canvases, saveCanvases, user?.$id]
+  )
+
   useEffect(() => {
     const onQuota = async () => {
       if (quotaHandlingRef.current) {
         return
       }
       quotaHandlingRef.current = true
-      // Try local IndexedDB migration first
       try {
-        const migrated = await migrateOldestToIndexedDB(0.8)
-        if (!migrated && canSyncWithDb && user?.$id) {
-          // try cloud eviction as fallback
-          try {
-            // upload oldest canvases to cloud then remove local payloads until under threshold
-            let estimate = await (navigator as any).storage.estimate()
-            const quota = estimate.quota || 0
-            let usage = estimate.usage || 0
-            let fraction = quota > 0 ? usage / quota : 0
-
-            const sorted = [...canvases].sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
-            for (const canvas of sorted) {
-              if (fraction < 0.8) break
-              if (!canvas) continue
-              if ((canvas as any).localStatus === 'evicted') continue
-
-              // ensure we have full payload (from idb if needed)
-              let payloadData = canvas.data
-              if (!payloadData) {
-                const idbKey = `canvas:${canvas.id}:data`
-                const idbVal = await idbGet<string>(idbKey)
-                payloadData = idbVal || ''
-              }
-
-              try {
-                await upsertCanvas(user.$id, { ...canvas, data: payloadData }, 'prefer-update')
-                // mark evicted locally
-                saveCanvases((current) =>
-                  current.map((c) =>
-                    c.id === canvas.id ? { ...c, data: '', localStatus: 'evicted', updatedAt: Date.now() } : c
-                  )
-                )
-
-                // delete idb copy if present
-                const idbKey = `canvas:${canvas.id}:data`
-                await idbDel(idbKey)
-
-                estimate = await (navigator as any).storage.estimate()
-                usage = estimate.usage || 0
-                fraction = quota > 0 ? usage / quota : 0
-              } catch (err) {
-                console.error('Failed to upload canvas during eviction', err)
-                // continue to next
-              }
-            }
-          } catch (err) {
-            console.error('Cloud eviction failed', err)
+        if (canSyncWithDb && user?.$id) {
+          const evicted = await evictOldestToCloud(0.8)
+          if (!evicted) {
+            await migrateOldestToIndexedDB(0.8)
           }
+        } else {
+          await migrateOldestToIndexedDB(0.8)
         }
       } catch (err) {
         console.error('Error during quota event migration', err)
@@ -504,7 +528,14 @@ export function useCanvases() {
           const usage = estimate.usage || 0
           const fraction = quota > 0 ? usage / quota : 0
           if (fraction >= 0.8) {
-            await migrateOldestToIndexedDB(0.8)
+            if (canSyncWithDb && user?.$id) {
+              const evicted = await evictOldestToCloud(0.8)
+              if (!evicted) {
+                await migrateOldestToIndexedDB(0.8)
+              }
+            } else {
+              await migrateOldestToIndexedDB(0.8)
+            }
           }
         } catch (err) {
           // ignore
@@ -515,7 +546,7 @@ export function useCanvases() {
     return () => {
       window.removeEventListener('storageQuotaExceeded', onQuota as EventListener)
     }
-  }, [migrateOldestToIndexedDB])
+  }, [canSyncWithDb, evictOldestToCloud, migrateOldestToIndexedDB, user?.$id])
 
   useEffect(() => {
     if (!canSyncWithDb) {

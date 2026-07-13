@@ -22,6 +22,7 @@ import {
 import type { ExcalidrawCanvas } from "@/types/canvas"
 import { getCanvasShare } from "@/lib/canvasShare"
 import QuotaModal from "@/components/QuotaModal"
+import { useAuth } from "@/hooks/useAuth"
 
 type CanvasesApi = ReturnType<typeof useCanvases>
 const QUOTA_MODAL_DISMISSED_KEY = "quotaModalDismissed"
@@ -258,6 +259,7 @@ function EditorPage({ canvasesApi }: { canvasesApi: CanvasesApi }) {
 
 export function App() {
   const canvasesApi = useCanvases()
+  const { user } = useAuth()
   const activeConflict = canvasesApi.syncConflicts[0]
   const [quotaOpen, setQuotaOpen] = useState(false)
   const [quotaDismissed, setQuotaDismissed] = useState(() => {
@@ -270,14 +272,14 @@ export function App() {
 
   useEffect(() => {
     const onQuota = () => {
-      if (quotaDismissed) {
+      if (quotaDismissed || user) {
         return
       }
       setQuotaOpen(true)
     }
     window.addEventListener('storageQuotaExceeded', onQuota as EventListener)
     return () => window.removeEventListener('storageQuotaExceeded', onQuota as EventListener)
-  }, [quotaDismissed])
+  }, [quotaDismissed, user])
 
   return (
     <>
